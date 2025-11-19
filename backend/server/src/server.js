@@ -2,6 +2,7 @@ require('dotenv').config();
 const app = require('./app');
 const { sequelize } = require('./models');
 const ragService = require('./services/rag');
+const { registerFileWorker } = require('./workers/fileWorker');
 
 const PORT = process.env.PORT || 16001;
 
@@ -18,6 +19,9 @@ async function startServer() {
       password: process.env.ELASTICSEARCH_PASSWORD
     });
     console.log('RAG Service (Elasticsearch) initialized.');
+
+    registerFileWorker();
+    console.log('File processing worker registered.');
 
     // Sync models (use { force: true } only for dev/reset)
     // await sequelize.sync({ alter: true }); 

@@ -17,7 +17,8 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Static files for uploads (if using local storage)
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+const storageBase = process.env.LOCAL_STORAGE_BASE || path.join(process.cwd(), 'storage');
+app.use('/uploads', express.static(path.resolve(storageBase, 'uploads')));
 
 // Routes
 app.use('/api', routes);
