@@ -5,10 +5,14 @@ const router = express.Router();
 const authRoutes = require('./auth.routes');
 const conversationRoutes = require('./conversation.routes');
 const fileRoutes = require('./file.routes');
+const ragRoutes = require('./rag.routes');
+const llmRoutes = require('./llm.routes');
 
 router.use('/auth', authRoutes);
 router.use('/conversations', conversationRoutes);
 router.use('/files', fileRoutes);
+router.use('/rag', ragRoutes);
+router.use('/llm', llmRoutes);
 
 router.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date() });
