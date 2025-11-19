@@ -3,6 +3,7 @@ import { MessageList } from './MessageList'
 import { MessageComposer } from './MessageComposer'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { ScrollArea } from '@/components/ui/scroll-area'
 
 export function ChatPanel({
   conversation,
@@ -10,7 +11,9 @@ export function ChatPanel({
   onSendMessage,
   onCreateConversation,
   selectedFileIds,
-  onClearFileSelection
+  onClearFileSelection,
+  selectedFiles,
+  isLoadingMessages
 }) {
   const canChat = Boolean(conversation)
 
@@ -42,10 +45,25 @@ export function ChatPanel({
       </div>
 
       <div className="flex-1 overflow-hidden">
-        <MessageList messages={messages} />
+        <div className="flex h-full flex-col">
+          {selectedFiles?.length > 0 && (
+            <ScrollArea className="border-b px-4 py-2">
+              <div className="flex flex-wrap gap-2">
+                {selectedFiles.map(file => (
+                  <Badge key={file.id} variant="secondary" className="text-xs">
+                    {file.name}
+                  </Badge>
+                ))}
+              </div>
+            </ScrollArea>
+          )}
+          <div className="flex-1 overflow-hidden">
+            <MessageList messages={messages} isLoading={isLoadingMessages} />
+          </div>
+        </div>
       </div>
 
-      <MessageComposer onSend={onSendMessage} disabled={!canChat} />
+      <MessageComposer onSend={onSendMessage} disabled={!canChat} isLoading={isLoadingMessages} />
     </div>
   )
 }

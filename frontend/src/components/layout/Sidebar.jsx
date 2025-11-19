@@ -10,23 +10,29 @@ export function Sidebar({
   onUploadFiles,
   onDeleteFile,
   selectedFileIds,
-  onToggleFile
+  onToggleFile,
+  onClearSelection
 }) {
   return (
     <div className="flex h-full flex-col">
-      <ConversationList
-        items={conversations}
-        activeId={activeConversationId}
-        onSelect={onSelectConversation}
-        onCreate={onCreateConversation}
-      />
-      <FileManager
-        files={files}
-        onUpload={onUploadFiles}
-        onDelete={onDeleteFile}
-        selectedIds={selectedFileIds}
-        onToggleSelect={onToggleFile}
-      />
+      <div className="flex-1 min-h-0">
+        <ConversationList
+          items={conversations}
+          activeId={activeConversationId}
+          onSelect={onSelectConversation}
+          onCreate={onCreateConversation}
+        />
+      </div>
+      <div className="flex-1 min-h-[220px] border-t">
+        <FileManager
+          files={files}
+          onUpload={onUploadFiles}
+          onDelete={onDeleteFile}
+          selectedIds={selectedFileIds}
+          onToggleSelect={onToggleFile}
+          onClearSelected={onClearSelection}
+        />
+      </div>
     </div>
   )
 }

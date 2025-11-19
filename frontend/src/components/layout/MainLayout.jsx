@@ -1,9 +1,13 @@
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { useAuth } from '@/context/AuthContext'
+import { Menu } from 'lucide-react'
+import { MobileSidebar } from '@/components/layout/MobileSidebar'
 
 export function MainLayout({ sidebar, children }) {
   const { user, logout } = useAuth()
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
 
   return (
     <div className="flex min-h-screen bg-background text-foreground">
@@ -18,6 +22,15 @@ export function MainLayout({ sidebar, children }) {
             <p className="text-sm text-muted-foreground">Chat with your documents and manage assets</p>
           </div>
           <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="lg:hidden"
+              onClick={() => setMobileSidebarOpen(true)}
+            >
+              <Menu className="h-4 w-4" />
+            </Button>
             <div className="text-right">
               <p className="text-sm font-medium">{user?.name}</p>
               <p className="text-xs text-muted-foreground">{user?.email}</p>
@@ -31,6 +44,14 @@ export function MainLayout({ sidebar, children }) {
 
         <main className="flex-1 overflow-hidden bg-muted/30">{children}</main>
       </div>
+
+      <MobileSidebar
+        open={mobileSidebarOpen}
+        onClose={() => setMobileSidebarOpen(false)}
+        title={user?.organization || 'Workspace'}
+      >
+        {sidebar}
+      </MobileSidebar>
     </div>
   )
 }

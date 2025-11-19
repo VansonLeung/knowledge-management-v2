@@ -1,12 +1,22 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+import { Trash2 } from 'lucide-react'
 
-export function FileManager({ files, onUpload, onDelete, selectedIds, onToggleSelect }) {
+const STATUS_VARIANTS = {
+  pending: { label: 'Queued', badge: 'outline', dot: 'bg-amber-500' },
+  processing: { label: 'Processing', badge: 'outline', dot: 'bg-blue-500' },
+  ready: { label: 'Ready', badge: 'default', dot: 'bg-emerald-500' },
+  failed: { label: 'Failed', badge: 'destructive', dot: 'bg-destructive' }
+}
+
+export function FileManager({ files, onUpload, onDelete, selectedIds, onToggleSelect, onClearSelected }) {
   const inputRef = useRef(null)
   const [isUploading, setIsUploading] = useState(false)
+  const [search, setSearch] = useState('')
 
   const handleUploadClick = () => {
     inputRef.current?.click()
@@ -24,8 +34,16 @@ export function FileManager({ files, onUpload, onDelete, selectedIds, onToggleSe
     }
   }
 
+  const filteredFiles = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    if (!query) return files
+    return files.filter(file => file.name.toLowerCase().includes(query))
+  }, [files, search])
+
+  const formatSize = size => `${(size / 1024).toFixed(1)} KB`
+
   return (
-    <div className="flex h-full flex-col border-t">
+    <div className="flex h-full flex-col">
       <div className="flex items-center justify-between px-4 py-3">
         <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Knowledge base</p>
         <Button size="sm" variant="secondary" type="button" onClick={handleUploadClick} disabled={isUploading}>
@@ -34,9 +52,26 @@ export function FileManager({ files, onUpload, onDelete, selectedIds, onToggleSe
         <input ref={inputRef} type="file" className="hidden" multiple onChange={handleFilesChanged} />
       </div>
 
+      <div className="space-y-2 px-4 pb-2">
+        <Input
+          value={search}
+          onChange={event => setSearch(event.target.value)}
+          placeholder="Search files"
+          className="h-8 text-sm"
+        />
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>{filteredFiles.length} files</span>
+          {selectedIds.length > 0 && (
+            <button type="button" className="text-primary" onClick={() => onClearSelected?.()}>
+              Clear selection
+            </button>
+          )}
+        </div>
+      </div>
+
       <ScrollArea className="flex-1 px-2">
         <ul className="space-y-1 pb-4">
-          {files.map(file => (
+          {filteredFiles.map(file => (
             <li key={file.id}>
               <div
                 className={cn(
@@ -47,10 +82,16 @@ export function FileManager({ files, onUpload, onDelete, selectedIds, onToggleSe
                 <button className="flex-1 text-left" onClick={() => onToggleSelect(file.id)}>
                   <p className="font-medium text-foreground">{file.name}</p>
                   <p className="text-xs text-muted-foreground">
-                    {(file.size / 1024).toFixed(1)} KB • {file.mimeType}
+                    {formatSize(file.size)} • {file.mimeType}
+                    {file.metadata?.chunkCount && ` • ${file.metadata.chunkCount} chunks`}
                   </p>
                 </button>
-                <Badge variant={file.status === 'ready' ? 'default' : 'outline'}>{file.status}</Badge>
+                <Badge variant={STATUS_VARIANTS[file.status]?.badge || 'outline'} className="mr-2 flex items-center gap-1">
+                  <span
+                    className={cn('h-2 w-2 rounded-full', STATUS_VARIANTS[file.status]?.dot || 'bg-muted-foreground')}
+                  />
+                  {STATUS_VARIANTS[file.status]?.label || file.status}
+                </Badge>
                 <Button
                   type="button"
                   variant="ghost"
@@ -58,14 +99,14 @@ export function FileManager({ files, onUpload, onDelete, selectedIds, onToggleSe
                   className="text-muted-foreground"
                   onClick={() => onDelete(file.id)}
                 >
-                  ×
+                  <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
             </li>
           ))}
-          {files.length === 0 && (
+          {filteredFiles.length === 0 && (
             <p className="px-3 py-6 text-center text-sm text-muted-foreground">
-              Upload files to make them searchable during chat.
+              {files.length === 0 ? 'Upload files to make them searchable during chat.' : 'No matches'}
             </p>
           )}
         </ul>

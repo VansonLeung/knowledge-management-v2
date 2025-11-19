@@ -1,9 +1,18 @@
+import { useEffect, useRef } from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 
-export function MessageList({ messages }) {
+export function MessageList({ messages, isLoading }) {
+  const viewportRef = useRef(null)
+
+  useEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    viewport.scrollTop = viewport.scrollHeight
+  }, [messages])
+
   return (
-    <ScrollArea className="h-full px-4 py-4">
+    <ScrollArea className="h-full px-4 py-4" viewportRef={viewportRef}>
       <div className="space-y-4">
         {messages.map(message => (
           <div key={message.id} className="flex gap-3">
@@ -21,7 +30,10 @@ export function MessageList({ messages }) {
             </div>
           </div>
         ))}
-        {messages.length === 0 && (
+        {isLoading && (
+          <p className="text-center text-sm text-muted-foreground">Loading messages…</p>
+        )}
+        {!isLoading && messages.length === 0 && (
           <p className="text-center text-sm text-muted-foreground">No messages yet. Say hello!</p>
         )}
       </div>

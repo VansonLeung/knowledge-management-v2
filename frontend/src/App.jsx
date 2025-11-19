@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AuthProvider, useAuth } from '@/context/AuthContext'
 import { AuthScreen } from '@/components/auth/AuthScreen'
 import { MainLayout } from '@/components/layout/MainLayout'
@@ -26,6 +26,7 @@ function AppContent() {
   const [selectedFileIds, setSelectedFileIds] = useState([])
   const [loadingWorkspace, setLoadingWorkspace] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false)
 
   const showError = useCallback(
     (err, { title = 'Something went wrong', fallback } = {}) => {
@@ -38,11 +39,15 @@ function AppContent() {
 
   const selectConversation = async conversation => {
     setSelectedConversation(conversation)
+    setIsLoadingMessages(true)
+    setMessages([])
     try {
       const data = await listMessages(conversation.id)
       setMessages(data)
     } catch (err) {
       showError(err, { title: 'Unable to fetch messages' })
+    } finally {
+      setIsLoadingMessages(false)
     }
   }
 
@@ -54,7 +59,7 @@ function AppContent() {
       setFiles(fileData)
 
       if (!selectedConversation && conversationData.length) {
-        selectConversation(conversationData[0])
+        await selectConversation(conversationData[0])
       }
     } catch (err) {
       showError(err, { title: 'Unable to load workspace' })
@@ -124,6 +129,11 @@ function AppContent() {
 
   const handleClearSelection = () => setSelectedFileIds([])
 
+  const selectedFiles = useMemo(
+    () => files.filter(file => selectedFileIds.includes(file.id)),
+    [files, selectedFileIds]
+  )
+
   if (status !== 'authenticated') {
     return (
       <AuthScreen
@@ -153,6 +163,7 @@ function AppContent() {
             onDeleteFile={handleDeleteFile}
             selectedFileIds={selectedFileIds}
             onToggleFile={handleToggleFile}
+            onClearSelection={handleClearSelection}
           />
         }
       >
@@ -164,6 +175,8 @@ function AppContent() {
             onCreateConversation={() => setDialogOpen(true)}
             selectedFileIds={selectedFileIds}
             onClearFileSelection={handleClearSelection}
+            selectedFiles={selectedFiles}
+            isLoadingMessages={isLoadingMessages}
           />
         </div>
       </MainLayout>

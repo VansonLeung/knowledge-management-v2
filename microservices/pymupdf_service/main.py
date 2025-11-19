@@ -5,6 +5,8 @@ import fitz  # PyMuPDF
 import os
 import tempfile
 import shutil
+import re
+from collections import Counter
 
 app = FastAPI(title="PyMuPDF Service", version="1.0.0")
 
@@ -21,24 +23,101 @@ app.add_middleware(
 async def health_check():
     return {"status": "ok"}
 
+STOPWORDS = {
+    'the', 'and', 'that', 'with', 'this', 'from', 'there', 'have', 'will', 'shall', 'your', 'about', 'into', 'been',
+    'were', 'would', 'could', 'should', 'their', 'them', 'these', 'those', 'here', 'such', 'than', 'then', 'over'
+}
+
+
+def _persist_pdf(upload: UploadFile) -> str:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+        shutil.copyfileobj(upload.file, tmp_file)
+        return tmp_file.name
+
+
+def _convert_to_markdown(path: str) -> str:
+    return pymupdf4llm.to_markdown(path)
+
+
+def _extract_headings(markdown: str, limit: int = 8):
+    headings = []
+    for line in markdown.splitlines():
+        if line.strip().startswith('#'):
+            title = line.lstrip('#').strip()
+            if title:
+                headings.append({"type": "heading", "value": title})
+        if len(headings) >= limit:
+            break
+    return headings
+
+
+def _extract_keywords(markdown: str, limit: int = 8):
+    tokens = re.findall(r"[A-Za-z]{4,}", markdown.lower())
+    filtered = [token for token in tokens if token not in STOPWORDS]
+    if not filtered:
+        return []
+    counts = Counter(filtered)
+    most_common = counts.most_common(limit)
+    max_freq = most_common[0][1] if most_common else 1
+    return [
+        {"type": "keyword", "value": word, "score": round(freq / max_freq, 2)}
+        for word, freq in most_common
+    ]
+
+
+def _document_metadata(path: str):
+    doc = fitz.open(path)
+    metadata = {
+        "page_count": doc.page_count,
+        "title": doc.metadata.get("title"),
+        "author": doc.metadata.get("author"),
+        "subject": doc.metadata.get("subject"),
+        "keywords": doc.metadata.get("keywords"),
+    }
+    doc.close()
+    return metadata
+
+
+def _analyze_pdf(path: str):
+    markdown = _convert_to_markdown(path)
+    metadata = _document_metadata(path)
+    entities = _extract_headings(markdown) + _extract_keywords(markdown)
+    if metadata.get("page_count"):
+        entities.append({"type": "page_count", "value": metadata["page_count"]})
+    return {"markdown": markdown, "metadata": metadata, "entities": entities}
+
+
 @app.post("/convert/pdf-to-markdown")
 async def convert_pdf_to_markdown(file: UploadFile = File(...)):
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="File must be a PDF")
 
-    # Create a temporary file to save the uploaded PDF
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-        shutil.copyfileobj(file.file, tmp_file)
-        tmp_path = tmp_file.name
+    tmp_path = _persist_pdf(file)
 
     try:
-        # Use pymupdf4llm to convert to markdown
-        md_text = pymupdf4llm.to_markdown(tmp_path)
+        md_text = _convert_to_markdown(tmp_path)
         return {"filename": file.filename, "markdown": md_text}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        # Clean up the temporary file
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+@app.post("/analyze/pdf")
+async def analyze_pdf(file: UploadFile = File(...)):
+    if not file.filename.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="File must be a PDF")
+
+    tmp_path = _persist_pdf(file)
+
+    try:
+        analysis = _analyze_pdf(tmp_path)
+        analysis["filename"] = file.filename
+        return analysis
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 

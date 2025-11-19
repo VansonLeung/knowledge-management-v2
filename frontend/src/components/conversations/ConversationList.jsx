@@ -1,8 +1,18 @@
+import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
 export function ConversationList({ items, activeId, onSelect, onCreate }) {
+  const [search, setSearch] = useState('')
+
+  const filteredItems = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    if (!query) return items
+    return items.filter(item => item.title.toLowerCase().includes(query))
+  }, [items, search])
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between px-4 py-3">
@@ -11,9 +21,17 @@ export function ConversationList({ items, activeId, onSelect, onCreate }) {
           New
         </Button>
       </div>
+      <div className="px-4 pb-2">
+        <Input
+          value={search}
+          onChange={event => setSearch(event.target.value)}
+          placeholder="Search by title"
+          className="h-8 text-sm"
+        />
+      </div>
       <ScrollArea className="flex-1 px-2">
         <ul className="space-y-1 pb-4">
-          {items.map(item => (
+          {filteredItems.map(item => (
             <li key={item.id}>
               <button
                 type="button"
@@ -31,9 +49,9 @@ export function ConversationList({ items, activeId, onSelect, onCreate }) {
               </button>
             </li>
           ))}
-          {items.length === 0 && (
+          {filteredItems.length === 0 && (
             <p className="px-3 py-6 text-center text-sm text-muted-foreground">
-              Start a conversation to begin chatting with your documents.
+              {items.length === 0 ? 'Start a conversation to begin chatting with your documents.' : 'No matches'}
             </p>
           )}
         </ul>

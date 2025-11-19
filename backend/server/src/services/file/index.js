@@ -111,20 +111,54 @@ async function fetchPdfAsMarkdown(fileRecord) {
   return response.data.markdown;
 }
 
+async function analyzePdf(fileRecord) {
+  const storage = getStorageProvider();
+  const fileStream = await storage.createReadStream(fileRecord.storagePath);
+
+  const form = new FormData();
+  form.append('file', fileStream, {
+    filename: fileRecord.originalName,
+    contentType: fileRecord.mimeType
+  });
+
+  const response = await axios.post(`${pymupdfServiceUrl}/analyze/pdf`, form, {
+    headers: form.getHeaders(),
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity
+  });
+
+  return response.data;
+}
+
 async function readFileAsText(fileRecord) {
   const storage = getStorageProvider();
   const buffer = await storage.readFile(fileRecord.storagePath);
   return buffer.toString('utf-8');
 }
 
-async function extractText(fileRecord) {
+async function extractFileContent(fileRecord) {
   if (fileRecord.mimeType === 'application/pdf') {
-    return fetchPdfAsMarkdown(fileRecord);
+    try {
+      return await analyzePdf(fileRecord);
+    } catch (error) {
+      console.warn('[FileService] analyze/pdf failed, falling back to markdown only', error.message);
+      const markdown = await fetchPdfAsMarkdown(fileRecord);
+      return {
+        markdown,
+        metadata: { mimeType: fileRecord.mimeType },
+        entities: []
+      };
+    }
   }
 
   const textualTypes = ['text/plain', 'text/markdown', 'text/csv', 'application/json'];
   if (textualTypes.includes(fileRecord.mimeType)) {
-    return readFileAsText(fileRecord);
+    const text = await readFileAsText(fileRecord);
+    return {
+      markdown: text,
+      metadata: { mimeType: fileRecord.mimeType },
+      entities: []
+    };
   }
 
   throw new Error(`Unsupported file type: ${fileRecord.mimeType}`);
@@ -140,20 +174,25 @@ async function processFile(fileId) {
   try {
     await fileRecord.update({ status: 'processing', error: null });
 
-    const text = await extractText(fileRecord);
-    const chunks = chunkText(text, 1500, 200);
+    const { markdown, metadata: extractedMetadata = {}, entities = [] } = await extractFileContent(fileRecord);
+    if (!markdown) {
+      throw new Error('No textual content returned from extractor');
+    }
+    const chunks = chunkText(markdown, 1500, 200);
 
     const ragDoc = {
       id: fileRecord.id,
       title: fileRecord.name,
-      content: text,
+      content: markdown,
       metadata: {
         originalName: fileRecord.originalName,
         folderId: fileRecord.folderId,
         ownerId: fileRecord.ownerId,
-        storagePath: fileRecord.storagePath
+        storagePath: fileRecord.storagePath,
+        ...fileRecord.metadata,
+        ...extractedMetadata
       },
-      entities: [],
+      entities,
       relationships: [],
       chunks
     };
@@ -165,6 +204,7 @@ async function processFile(fileId) {
       status: 'ready',
       metadata: {
         ...fileRecord.metadata,
+        ...extractedMetadata,
         chunkCount: chunks.length
       }
     });
