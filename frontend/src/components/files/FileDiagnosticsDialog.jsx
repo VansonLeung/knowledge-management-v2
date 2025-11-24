@@ -12,7 +12,11 @@ export function FileDiagnosticsDialog({ open, onClose, data, isLoading }) {
   const [searchError, setSearchError] = useState(null)
   const [chunkResults, setChunkResults] = useState(null)
 
-  const chunkVectors = useMemo(() => data?.document?.chunkVectors || [], [data])
+  const chunkVectors = useMemo(() => {
+    if (data?.document?.sampleChunks) return data.document.sampleChunks
+    return data?.document?.chunkVectors || []
+  }, [data])
+
   const entityBadges = useMemo(() => {
     if (!Array.isArray(data?.document?.entities)) return []
     return data.document.entities
@@ -78,6 +82,17 @@ export function FileDiagnosticsDialog({ open, onClose, data, isLoading }) {
       const result = await searchKnowledgeBase(payload)
       const flattened = (result.documents || [])
         .map(doc => {
+          // Handle chunk-as-document
+          if (doc.content && !doc.bestChunk && !doc.chunks) {
+            return {
+              id: doc.id,
+              content: doc.content,
+              metadata: doc.metadata || {},
+              score: doc.vectorScore ?? doc.hybridScore ?? null,
+              title: doc.title || doc.metadata?.originalName || doc.id
+            }
+          }
+
           const chunk = doc.bestChunk || doc.chunks?.[0]
           const content = typeof chunk?.content === 'string' ? chunk.content : String(chunk?.content || '')
           if (!chunk || !content.trim()) return null

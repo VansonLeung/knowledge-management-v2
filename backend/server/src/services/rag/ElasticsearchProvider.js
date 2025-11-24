@@ -343,6 +343,43 @@ class ElasticsearchProvider extends RagProvider {
     }
   }
 
+  async deleteDocumentsByQuery(collection, query) {
+    try {
+      await this.client.deleteByQuery({
+        index: collection,
+        body: {
+          query
+        },
+        refresh: true
+      });
+    } catch (error) {
+      console.error('[ElasticsearchProvider] deleteDocumentsByQuery failed', error.message);
+      throw error;
+    }
+  }
+
+  async updateDocumentsMetadata(collection, filter, metadataPatch) {
+    try {
+      await this.client.updateByQuery({
+        index: collection,
+        body: {
+          query: filter,
+          script: {
+            source: "if (ctx._source.metadata == null) { ctx._source.metadata = params.metadata } else { ctx._source.metadata.putAll(params.metadata) }",
+            lang: "painless",
+            params: {
+              metadata: metadataPatch
+            }
+          }
+        },
+        refresh: true
+      });
+    } catch (error) {
+      console.error('[ElasticsearchProvider] updateDocumentsMetadata failed', error.message);
+      throw error;
+    }
+  }
+
   async getDocument(collection, id) {
     try {
       const response = await this.client.get({ index: collection, id });

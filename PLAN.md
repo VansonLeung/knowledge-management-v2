@@ -80,6 +80,10 @@ This plan outlines the steps to refactor the Knowledge Management System to supp
     - Show "Page X" and "Source File" for each hit.
 - [ ] **5.2 Context View (Optional)**
     - Add a feature to "View Surrounding Chunks" (fetch `chunk_index - 1` and `chunk_index + 1`) to see context without loading the full PDF.
+- [ ] **5.3 Update Main Frontend Application (`frontend/`)**
+    - Update `api/rag.js` to consume the new chunk-based search API.
+    - Update Search UI (`components/search/`) to display chunk hits with page numbers.
+    - Update Chat/RAG UI (`components/chat/`) to handle chunk citations.
 
 ## Phase 6: Migration & Performance
 

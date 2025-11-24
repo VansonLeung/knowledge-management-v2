@@ -52,6 +52,10 @@ export function VectorSearchDialog({
 
   const resolvePageNumber = doc => {
     if (!doc) return null
+    // Check if doc itself is a chunk with metadata
+    if (doc.metadata?.pageNumber !== undefined && doc.metadata?.pageNumber !== null) {
+      return doc.metadata.pageNumber
+    }
     const best = doc.bestChunk?.metadata?.pageNumber
     if (best !== undefined && best !== null) {
       return best
@@ -350,10 +354,10 @@ export function VectorSearchDialog({
                       </button>
                     )}
                   </div>
-                  {doc.bestChunk && (
+                  {(doc.bestChunk || doc.content) && (
                     <p className="whitespace-pre-line text-sm text-muted-foreground">
-                      {doc.bestChunk.content?.slice(0, 360)}
-                      {doc.bestChunk.content?.length > 360 && '…'}
+                      {(doc.bestChunk?.content || doc.content)?.slice(0, 360)}
+                      {(doc.bestChunk?.content || doc.content)?.length > 360 && '…'}
                     </p>
                   )}
                 </article>

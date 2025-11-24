@@ -10,6 +10,7 @@ const { embedTexts, averageEmbedding } = require('../embeddings');
 
 const COLLECTION_NAME = process.env.RAG_COLLECTION || 'knowledge_documents';
 const pymupdfServiceUrl = process.env.PYMUPDF_SERVICE_URL || 'http://localhost:16002';
+const chunkingServiceUrl = process.env.CHUNKING_SERVICE_URL || 'http://localhost:8001';
 
 function normalizeOriginalName(value) {
   if (typeof value !== 'string' || !value) return 'uploaded-file';
@@ -36,21 +37,55 @@ function buildChunkPayloads(fileId, chunks, embeddings = []) {
   });
 }
 
-function buildChunkDescriptors(markdown, pageEntries = []) {
+async function buildChunkDescriptors(markdown, pageEntries = []) {
   if (Array.isArray(pageEntries) && pageEntries.length) {
-    return pageEntries.flatMap(entry => {
+    const chunks = [];
+    for (const entry of pageEntries) {
       const text = typeof entry.text === 'string' ? entry.text.trim() : '';
       const markdownContent = typeof entry.markdown === 'string' ? entry.markdown.trim() : '';
       const pageContent = markdownContent || text;
-      if (!pageContent) return [];
-      return chunkText(pageContent, 1500, 200).map(content => ({
-        content,
-        metadata: { pageNumber: entry.page }
-      }));
-    });
+
+      if (!pageContent) continue;
+
+      try {
+        const response = await axios.post(`${chunkingServiceUrl}/chunk`, {
+          text: pageContent,
+          chunk_size: 1000,
+          chunk_overlap: 200,
+          metadata: { pageNumber: entry.page }
+        });
+
+        if (response.data && Array.isArray(response.data.chunks)) {
+          chunks.push(...response.data.chunks.map(c => ({
+            content: c.text,
+            metadata: c.metadata
+          })));
+        }
+      } catch (error) {
+        console.warn(`[FileService] Chunking failed for page ${entry.page}:`, error.message);
+      }
+    }
+    return chunks;
   }
 
-  return chunkText(markdown, 1500, 200).map(content => ({ content }));
+  try {
+    const response = await axios.post(`${chunkingServiceUrl}/chunk`, {
+      text: markdown,
+      chunk_size: 1000,
+      chunk_overlap: 200
+    });
+
+    if (response.data && Array.isArray(response.data.chunks)) {
+      return response.data.chunks.map(c => ({
+        content: c.text,
+        metadata: c.metadata
+      }));
+    }
+  } catch (error) {
+    console.warn('[FileService] Chunking failed for document:', error.message);
+  }
+
+  return [];
 }
 
 function normalizeEntities(entities = []) {
@@ -82,20 +117,12 @@ function normalizeEntities(entities = []) {
 async function syncRagDocumentMetadata(fileId, metadataPatch = {}) {
   try {
     const provider = ragService.getProvider();
-    const document = await provider.getDocument(COLLECTION_NAME, fileId);
-    if (!document) return null;
+    
+    await provider.updateDocumentsMetadata(COLLECTION_NAME, {
+      term: { 'metadata.fileId.keyword': fileId }
+    }, metadataPatch);
 
-    const updated = {
-      ...document,
-      id: fileId,
-      metadata: { ...(document.metadata || {}), ...metadataPatch },
-      chunkVectors: document.chunkVectors || [],
-      entities: Array.isArray(document.entities) ? document.entities : [],
-      relationships: Array.isArray(document.relationships) ? document.relationships : []
-    };
-
-    await provider.indexDocument(COLLECTION_NAME, updated, { vectorize: false });
-    return updated;
+    return true;
   } catch (error) {
     console.warn(`[FileService] Failed to sync RAG metadata for ${fileId}:`, error.message);
     return null;
@@ -262,7 +289,16 @@ async function deleteFile(userId, fileId) {
   await storage.remove(file.storagePath);
   await File.destroy({ where: { id: fileId } });
   await ConversationFile.destroy({ where: { fileId } });
-  await provider.deleteDocument(COLLECTION_NAME, fileId);
+  
+  // Delete all chunks associated with this file
+  try {
+    await provider.deleteDocumentsByQuery(COLLECTION_NAME, {
+      term: { 'metadata.fileId.keyword': fileId }
+    });
+  } catch (error) {
+    console.warn(`[FileService] Failed to delete chunks for file ${fileId}:`, error.message);
+  }
+  
   return true;
 }
 
@@ -440,7 +476,16 @@ async function getFileDiagnostics(userId, fileId) {
   let document = null;
   try {
     const provider = ragService.getProvider();
-    document = await provider.getDocument(COLLECTION_NAME, fileId);
+    // Since we index chunks separately, we search for them
+    const results = await provider.search(COLLECTION_NAME, null, {
+      filters: { 'metadata.fileId': fileId },
+      limit: 5
+    });
+    document = { 
+      chunksFound: results.length, 
+      sampleChunks: results,
+      note: "Document is indexed as individual chunks."
+    };
   } catch (error) {
     if (error.statusCode !== 404) {
       throw error;
@@ -465,7 +510,7 @@ async function processFile(fileId) {
       throw new Error('No textual content returned from extractor');
     }
     const pageEntries = Array.isArray(pages) ? pages : [];
-    const chunkDescriptors = buildChunkDescriptors(markdown, pageEntries);
+    const chunkDescriptors = await buildChunkDescriptors(markdown, pageEntries);
     const normalizedEntities = normalizeEntities(entities);
     let chunkEmbeddings = [];
 
@@ -478,30 +523,33 @@ async function processFile(fileId) {
     }
 
     const chunkPayloads = buildChunkPayloads(fileRecord.id, chunkDescriptors, chunkEmbeddings);
-    const docEmbedding = averageEmbedding(chunkPayloads.map(chunk => chunk.embedding).filter(Boolean));
-
-    const ragDoc = {
-      id: fileRecord.id,
-      title: fileRecord.name,
-      content: markdown,
-      metadata: {
-        originalName: fileRecord.originalName,
-        folderId: fileRecord.folderId,
-        ownerId: fileRecord.ownerId,
-        storagePath: fileRecord.storagePath,
-        fileId: fileRecord.id,
-        ...fileRecord.metadata,
-        ...extractedMetadata,
-        pageCount: pageEntries.length || undefined
-      },
-      entities: normalizedEntities,
-      relationships: [],
-      chunkVectors: chunkPayloads,
-      embedding: docEmbedding
-    };
-
+    
     const provider = ragService.getProvider();
-    await provider.indexDocument(COLLECTION_NAME, ragDoc, { vectorize: false });
+    
+    // Index each chunk as a separate document
+    for (const chunk of chunkPayloads) {
+      const chunkDoc = {
+        id: chunk.id,
+        title: fileRecord.name,
+        content: chunk.content,
+        metadata: {
+          originalName: fileRecord.originalName,
+          folderId: fileRecord.folderId,
+          ownerId: fileRecord.ownerId,
+          storagePath: fileRecord.storagePath,
+          fileId: fileRecord.id,
+          ...fileRecord.metadata,
+          ...extractedMetadata,
+          pageCount: pageEntries.length || undefined,
+          ...chunk.metadata
+        },
+        entities: normalizedEntities,
+        relationships: [],
+        embedding: chunk.embedding
+      };
+      
+      await provider.indexDocument(COLLECTION_NAME, chunkDoc, { vectorize: false });
+    }
 
     await fileRecord.update({
       status: 'ready',
