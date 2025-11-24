@@ -3,7 +3,7 @@ import { MessageList } from './MessageList'
 import { MessageComposer } from './MessageComposer'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { ScrollArea } from '@/components/ui/scroll-area'
+import { FilePreviewPanel } from '@/components/files/FilePreviewPanel'
 
 export function ChatPanel({
   conversation,
@@ -51,17 +51,7 @@ export function ChatPanel({
 
       <div className="flex-1 min-h-0 overflow-hidden">
         <div className="flex h-full flex-col">
-          {selectedFiles?.length > 0 && (
-            <ScrollArea className="max-h-32 border-b px-4 py-2">
-              <div className="flex flex-wrap gap-2">
-                {selectedFiles.map(file => (
-                  <Badge key={file.id} variant="secondary" className="text-xs">
-                    {file.name}
-                  </Badge>
-                ))}
-              </div>
-            </ScrollArea>
-          )}
+          {selectedFiles?.length > 0 && <FilePreviewPanel files={selectedFiles} />}
           <div className="flex-1 min-h-0 overflow-hidden">
             <MessageList messages={messages} isLoading={isLoadingMessages} />
           </div>

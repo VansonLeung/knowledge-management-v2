@@ -8,7 +8,7 @@ import { LoadingState } from '@/components/shared/LoadingState'
 import { CreateConversationDialog } from '@/components/conversations/CreateConversationDialog'
 import { VectorSearchDialog } from '@/components/search/VectorSearchDialog'
 import { useToast } from '@/components/ui/use-toast'
-import { listConversations, createConversation, listMessages } from '@/api/conversations'
+import { listConversations, createConversation, deleteConversation as deleteConversationApi, listMessages } from '@/api/conversations'
 import { listFiles, uploadFiles, deleteFile } from '@/api/files'
 import { streamAssistantResponse } from '@/api/chat'
 
@@ -182,6 +182,24 @@ function AppContent() {
     }
   }
 
+  const handleDeleteConversation = async conversation => {
+    if (!conversation) return
+    const confirmed = typeof window === 'undefined'
+      ? true
+      : window.confirm(`Delete "${conversation.title}" and its messages? This cannot be undone.`)
+    if (!confirmed) return
+    try {
+      await deleteConversationApi(conversation.id)
+      setConversations(prev => prev.filter(item => item.id !== conversation.id))
+      if (selectedConversation?.id === conversation.id) {
+        setSelectedConversation(null)
+        setMessages([])
+      }
+    } catch (err) {
+      showError(err, { title: 'Unable to delete conversation' })
+    }
+  }
+
   const handleClearSelection = () => setSelectedFileIds([])
 
   const selectedFiles = useMemo(
@@ -213,6 +231,7 @@ function AppContent() {
             activeConversationId={selectedConversation?.id}
             onSelectConversation={selectConversation}
             onCreateConversation={() => setDialogOpen(true)}
+            onDeleteConversation={handleDeleteConversation}
             files={files}
             onUploadFiles={handleUploadFiles}
             onDeleteFile={handleDeleteFile}

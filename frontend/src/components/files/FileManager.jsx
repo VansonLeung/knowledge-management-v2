@@ -13,6 +13,8 @@ const STATUS_VARIANTS = {
   failed: { label: 'Failed', badge: 'destructive', dot: 'bg-destructive' }
 }
 
+const getDisplayName = file => file?.originalName || file?.name || 'Untitled file'
+
 export function FileManager({ files, onUpload, onDelete, selectedIds = [], onToggleSelect, onClearSelected }) {
   const inputRef = useRef(null)
   const [isUploading, setIsUploading] = useState(false)
@@ -55,7 +57,7 @@ export function FileManager({ files, onUpload, onDelete, selectedIds = [], onTog
   const filteredFiles = useMemo(() => {
     const query = search.trim().toLowerCase()
     if (!query) return files
-    return files.filter(file => file.name.toLowerCase().includes(query))
+    return files.filter(file => getDisplayName(file).toLowerCase().includes(query))
   }, [files, search])
 
   const formatSize = size => `${(size / 1024).toFixed(1)} KB`
@@ -111,7 +113,7 @@ export function FileManager({ files, onUpload, onDelete, selectedIds = [], onTog
                 )}
               >
                 <button className="flex-1 text-left" onClick={() => onToggleSelect(file.id)}>
-                  <p className="font-medium text-foreground">{file.name}</p>
+                  <p className="font-medium text-foreground">{getDisplayName(file)}</p>
                   <p className="text-xs text-muted-foreground">
                     {formatSize(file.size)} • {file.mimeType}
                     {file.metadata?.chunkCount && ` • ${file.metadata.chunkCount} chunks`}

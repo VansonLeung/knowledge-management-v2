@@ -6,6 +6,7 @@ export function Sidebar({
   activeConversationId,
   onSelectConversation,
   onCreateConversation,
+  onDeleteConversation,
   files,
   onUploadFiles,
   onDeleteFile,
@@ -21,6 +22,7 @@ export function Sidebar({
           activeId={activeConversationId}
           onSelect={onSelectConversation}
           onCreate={onCreateConversation}
+          onDelete={onDeleteConversation}
         />
       </div>
       <div className="flex flex-1 min-h-0 flex-col border-t">
