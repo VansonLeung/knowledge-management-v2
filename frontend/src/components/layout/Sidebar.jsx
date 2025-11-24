@@ -15,7 +15,7 @@ export function Sidebar({
 }) {
   return (
     <div className="flex h-full flex-col">
-      <div className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0 overflow-hidden">
         <ConversationList
           items={conversations}
           activeId={activeConversationId}
@@ -23,7 +23,7 @@ export function Sidebar({
           onCreate={onCreateConversation}
         />
       </div>
-      <div className="flex-1 min-h-[220px] border-t">
+      <div className="flex flex-1 min-h-0 flex-col border-t">
         <FileManager
           files={files}
           onUpload={onUploadFiles}

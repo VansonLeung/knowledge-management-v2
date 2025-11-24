@@ -10,12 +10,12 @@ export function MainLayout({ sidebar, children }) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
 
   return (
-    <div className="flex min-h-screen bg-background text-foreground">
-      <aside className="hidden w-80 border-r bg-card lg:flex lg:flex-col">
+    <div className="flex h-screen min-h-screen w-screen overflow-hidden bg-background text-foreground">
+      <aside className="hidden h-full w-80 overflow-hidden border-r bg-card lg:flex lg:flex-col">
         {sidebar}
       </aside>
 
-      <div className="flex flex-1 flex-col">
+      <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
         <header className="flex items-center justify-between border-b px-4 py-3">
           <div>
             <h1 className="text-xl font-semibold">Knowledge Base</h1>
@@ -42,7 +42,9 @@ export function MainLayout({ sidebar, children }) {
           </div>
         </header>
 
-        <main className="flex-1 overflow-hidden bg-muted/30">{children}</main>
+        <main className="flex-1 min-h-0 overflow-hidden bg-muted/30">
+          <div className="flex h-full flex-1 flex-col overflow-hidden">{children}</div>
+        </main>
       </div>
 
       <MobileSidebar

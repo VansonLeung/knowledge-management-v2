@@ -19,9 +19,10 @@
  * @property {string} content - The main textual content
  * @property {string} [title] - Document title
  * @property {Object} [metadata] - Arbitrary metadata (e.g., file path, author)
+ * @property {number[]} [embedding] - Document-level embedding vector
  * @property {RagEntity[]} [entities] - Extracted entities for GraphRAG
  * @property {RagRelationship[]} [relationships] - Extracted relationships for GraphRAG
- * @property {string[]} [chunks] - Pre-calculated chunks if available
+ * @property {Array<{id?: string, content: string, embedding?: number[], metadata?: Object}>} [chunkVectors] - Pre-calculated chunks if available
  */
 
 /**
@@ -54,9 +55,11 @@ class RagProvider {
    * Index a document
    * @param {string} collection - The collection/index name
    * @param {RagDocument} document - The complex document object
+   * @param {Object} [options]
+   * @param {boolean} [options.vectorize=true] - Whether embeddings should be generated server-side
    * @returns {Promise<void>}
    */
-  async indexDocument(collection, document) {
+  async indexDocument(collection, document, options = {}) {
     throw new Error("Method 'indexDocument()' must be implemented.");
   }
 

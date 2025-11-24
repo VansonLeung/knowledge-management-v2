@@ -57,7 +57,8 @@ export function GraphRagPanel({ config, request }) {
     metadata: '',
     entities: '',
     relationships: '',
-    chunks: ''
+    chunks: '',
+    autoVectorize: true
   })
   const [newDocumentResponse, setNewDocumentResponse] = useState(null)
   const [newDocumentLoading, setNewDocumentLoading] = useState(false)
@@ -90,7 +91,11 @@ export function GraphRagPanel({ config, request }) {
     query: '',
     topK: 5,
     includeRelations: true,
-    metadata: ''
+    metadata: '',
+    searchMode: 'keyword',
+    vectorWeight: 0.7,
+    textWeight: 0.3,
+    candidateCount: 40
   })
   const [searchResponse, setSearchResponse] = useState(null)
   const [searchLoading, setSearchLoading] = useState(false)
@@ -169,7 +174,8 @@ export function GraphRagPanel({ config, request }) {
       metadata: safeParse(newDocument.metadata, {}),
       entities: safeParse(newDocument.entities, []),
       relationships: safeParse(newDocument.relationships, []),
-      chunks: safeParse(newDocument.chunks, [])
+      chunks: safeParse(newDocument.chunks, []),
+      vectorize: Boolean(newDocument.autoVectorize)
     }
     try {
       const res = await request({ method: 'POST', path: `/rag/indexes/${newDocument.indexName}/documents`, body })
@@ -274,7 +280,18 @@ export function GraphRagPanel({ config, request }) {
       query: searchInputs.query,
       topK: Number(searchInputs.topK) || 5,
       includeRelations: searchInputs.includeRelations,
-      metadata: metadataFilters
+      metadata: metadataFilters,
+      searchMode: searchInputs.searchMode
+    }
+
+    if (searchInputs.searchMode !== 'keyword') {
+      const vectorWeight = Number(searchInputs.vectorWeight)
+      const textWeight = Number(searchInputs.textWeight)
+      const candidateCount = Number(searchInputs.candidateCount)
+
+      body.vectorWeight = Number.isNaN(vectorWeight) ? undefined : vectorWeight
+      body.textWeight = Number.isNaN(textWeight) ? undefined : textWeight
+      body.candidateCount = Number.isNaN(candidateCount) ? undefined : candidateCount
     }
     try {
       const res = await request({ method: 'POST', path: searchInputs.path, body })
@@ -545,6 +562,18 @@ export function GraphRagPanel({ config, request }) {
                 rows={3}
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="newDocVectorize">Auto-generate embeddings?</Label>
+              <select
+                id="newDocVectorize"
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={newDocument.autoVectorize ? 'true' : 'false'}
+                onChange={event => setNewDocument(prev => ({ ...prev, autoVectorize: event.target.value === 'true' }))}
+              >
+                <option value="true">Yes (recommended)</option>
+                <option value="false">No</option>
+              </select>
+            </div>
             <Button type="submit" disabled={newDocumentLoading}>
               {newDocumentLoading ? 'Indexing…' : 'Create document'}
             </Button>
@@ -682,7 +711,7 @@ export function GraphRagPanel({ config, request }) {
                 required
               />
             </div>
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-4">
               <div className="space-y-2">
                 <Label htmlFor="searchPath">Endpoint path</Label>
                 <Input
@@ -715,7 +744,62 @@ export function GraphRagPanel({ config, request }) {
                   <option value="false">No</option>
                 </select>
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="searchMode">Mode</Label>
+                <select
+                  id="searchMode"
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  value={searchInputs.searchMode}
+                  onChange={event => setSearchInputs(prev => ({ ...prev, searchMode: event.target.value }))}
+                >
+                  <option value="keyword">Keyword</option>
+                  <option value="vector">Vector</option>
+                  <option value="hybrid">Hybrid</option>
+                </select>
+              </div>
             </div>
+            {searchInputs.searchMode !== 'keyword' && (
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="space-y-2">
+                  <Label htmlFor="vectorWeight">Vector weight</Label>
+                  <Input
+                    id="vectorWeight"
+                    type="number"
+                    min={0}
+                    max={1}
+                    step="0.1"
+                    value={searchInputs.vectorWeight}
+                    onChange={event => setSearchInputs(prev => ({ ...prev, vectorWeight: event.target.value }))}
+                  />
+                  <p className="text-xs text-muted-foreground">Used when mode is vector or hybrid.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="textWeight">Keyword weight</Label>
+                  <Input
+                    id="textWeight"
+                    type="number"
+                    min={0}
+                    max={1}
+                    step="0.1"
+                    value={searchInputs.textWeight}
+                    onChange={event => setSearchInputs(prev => ({ ...prev, textWeight: event.target.value }))}
+                    disabled={searchInputs.searchMode === 'vector'}
+                  />
+                  <p className="text-xs text-muted-foreground">Only applied for hybrid scoring.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="candidateCount">Candidate window</Label>
+                  <Input
+                    id="candidateCount"
+                    type="number"
+                    min={Number(searchInputs.topK) || 1}
+                    value={searchInputs.candidateCount}
+                    onChange={event => setSearchInputs(prev => ({ ...prev, candidateCount: event.target.value }))}
+                  />
+                  <p className="text-xs text-muted-foreground">How many docs to pull before re-ranking.</p>
+                </div>
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="metadataFilter">Metadata filter (JSON)</Label>
               <Textarea

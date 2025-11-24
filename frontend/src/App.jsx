@@ -6,17 +6,14 @@ import { Sidebar } from '@/components/layout/Sidebar'
 import { ChatPanel } from '@/components/chat/ChatPanel'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { CreateConversationDialog } from '@/components/conversations/CreateConversationDialog'
+import { VectorSearchDialog } from '@/components/search/VectorSearchDialog'
 import { useToast } from '@/components/ui/use-toast'
-import {
-  listConversations,
-  createConversation,
-  listMessages,
-  createMessage
-} from '@/api/conversations'
+import { listConversations, createConversation, listMessages } from '@/api/conversations'
 import { listFiles, uploadFiles, deleteFile } from '@/api/files'
+import { streamAssistantResponse } from '@/api/chat'
 
 function AppContent() {
-  const { status, login, register } = useAuth()
+  const { status, login, register, token } = useAuth()
   const { toast } = useToast()
   const [authMode, setAuthMode] = useState('login')
   const [conversations, setConversations] = useState([])
@@ -27,6 +24,8 @@ function AppContent() {
   const [loadingWorkspace, setLoadingWorkspace] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [isLoadingMessages, setIsLoadingMessages] = useState(false)
+  const [isSendingMessage, setIsSendingMessage] = useState(false)
+  const [searchDialogOpen, setSearchDialogOpen] = useState(false)
 
   const showError = useCallback(
     (err, { title = 'Something went wrong', fallback } = {}) => {
@@ -78,16 +77,70 @@ function AppContent() {
   }, [status])
 
   const handleSendMessage = async content => {
-    if (!selectedConversation) return
+    if (!selectedConversation || !content.trim() || isSendingMessage || !token) return
+    const conversationId = selectedConversation.id
+    const targetFileIds = [...selectedFileIds]
+    setIsSendingMessage(true)
+
+    let tempAssistantId = null
+    let serverAssistantId = null
+    let assistantContent = ''
+
+    const ensureAssistantPlaceholder = () => {
+      if (tempAssistantId) return
+      tempAssistantId = `temp-${Date.now()}`
+      setMessages(prev => [
+        ...prev,
+        { id: tempAssistantId, role: 'assistant', content: '', metadata: { streaming: true } }
+      ])
+    }
+
+    const appendToken = tokenChunk => {
+      if (!tokenChunk) return
+      ensureAssistantPlaceholder()
+      assistantContent += tokenChunk
+      setMessages(prev =>
+        prev.map(msg => (msg.id === tempAssistantId ? { ...msg, content: assistantContent } : msg))
+      )
+    }
+
     try {
-      const message = await createMessage(selectedConversation.id, {
-        content,
-        role: 'user',
-        metadata: { fileIds: selectedFileIds, scope: selectedFileIds.length ? 'files' : 'knowledge-base' }
+      await streamAssistantResponse({
+        conversationId,
+        token,
+        payload: {
+          content,
+          fileIds: targetFileIds,
+          searchMode: 'hybrid',
+          vectorWeight: 0.7,
+          textWeight: 0.3,
+          candidateCount: 15
+        },
+        onEvent: ({ event, data }) => {
+          if (event === 'user_message') {
+            setMessages(prev => [...prev, data])
+          } else if (event === 'token') {
+            appendToken(data?.token)
+          } else if (event === 'assistant_message') {
+            if (tempAssistantId) {
+              setMessages(prev => prev.map(msg => (msg.id === tempAssistantId ? data : msg)))
+            } else {
+              setMessages(prev => [...prev, data])
+            }
+            serverAssistantId = data.id
+          } else if (event === 'error') {
+            throw new Error(data?.message || 'Streaming failed')
+          }
+        }
       })
-      setMessages(prev => [...prev, message])
     } catch (err) {
       showError(err, { title: 'Message failed to send' })
+      if (!serverAssistantId && tempAssistantId) {
+        const placeholderId = tempAssistantId
+        setMessages(prev => prev.filter(msg => msg.id !== placeholderId))
+      }
+    } finally {
+      setIsSendingMessage(false)
     }
   }
 
@@ -103,11 +156,13 @@ function AppContent() {
     }
   }
 
-  const handleDeleteFile = async fileId => {
+  const handleDeleteFile = async fileIds => {
+    const targets = Array.isArray(fileIds) ? fileIds : [fileIds]
+    if (!targets.length) return
     try {
-      await deleteFile(fileId)
-      setFiles(prev => prev.filter(file => file.id !== fileId))
-      setSelectedFileIds(prev => prev.filter(id => id !== fileId))
+      await Promise.all(targets.map(id => deleteFile(id)))
+      setFiles(prev => prev.filter(file => !targets.includes(file.id)))
+      setSelectedFileIds(prev => prev.filter(id => !targets.includes(id)))
     } catch (err) {
       showError(err, { title: 'Unable to delete file' })
     }
@@ -167,7 +222,7 @@ function AppContent() {
           />
         }
       >
-        <div className="h-full">
+        <div className="flex flex-1 min-h-0 flex-col">
           <ChatPanel
             conversation={selectedConversation}
             messages={messages}
@@ -177,6 +232,8 @@ function AppContent() {
             onClearFileSelection={handleClearSelection}
             selectedFiles={selectedFiles}
             isLoadingMessages={isLoadingMessages}
+            isSendingMessage={isSendingMessage}
+            onOpenVectorSearch={() => setSearchDialogOpen(true)}
           />
         </div>
       </MainLayout>
@@ -185,6 +242,13 @@ function AppContent() {
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         onCreate={handleCreateConversation}
+      />
+
+      <VectorSearchDialog
+        open={searchDialogOpen}
+        onClose={() => setSearchDialogOpen(false)}
+        defaultIndex={null}
+        selectedFiles={selectedFiles}
       />
     </>
   )

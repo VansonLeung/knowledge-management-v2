@@ -1,5 +1,6 @@
 const openai = require('../config/openai');
 const ragService = require('../services/rag');
+const embeddings = require('../services/embeddings');
 
 const DEFAULT_INDEX = process.env.RAG_COLLECTION || 'knowledge_documents';
 const DEFAULT_MODEL = process.env.DEFAULT_LLM_MODEL || 'gpt-4o-mini';
@@ -9,12 +10,23 @@ const DEFAULT_MAPPINGS = {
     title: { type: 'text' },
     content: { type: 'text' },
     metadata: { type: 'object', enabled: true },
+    embedding: { type: 'float' },
     entities: {
       type: 'nested',
       properties: {
         name: { type: 'keyword' },
         type: { type: 'keyword' },
         description: { type: 'text' }
+      }
+    },
+    chunks: { type: 'text' }, // legacy text field retained for backwards compatibility
+    chunkVectors: {
+      type: 'nested',
+      properties: {
+        id: { type: 'keyword' },
+        content: { type: 'text' },
+        embedding: { type: 'float' },
+        metadata: { type: 'object', enabled: true }
       }
     },
     relationships: {
@@ -276,7 +288,17 @@ async function getDocumentById(req, res, next) {
 async function createDocument(req, res, next) {
   try {
     const { indexName } = req.params;
-    const { id, title, content, metadata = {}, entities = [], relationships = [], chunks = [] } = req.body;
+    const {
+      id,
+      title,
+      content,
+      metadata = {},
+      entities = [],
+      relationships = [],
+      chunkVectors = [],
+      chunks = [],
+      vectorize = true
+    } = req.body;
 
     if (!content) {
       return res.status(400).json({ success: false, error: 'Content is required' });
@@ -290,10 +312,10 @@ async function createDocument(req, res, next) {
       metadata,
       entities,
       relationships,
-      chunks
+      chunkVectors: chunkVectors.length ? chunkVectors : chunks
     };
 
-    await provider.indexDocument(indexName, document);
+    await provider.indexDocument(indexName, document, { vectorize });
 
     res.status(201).json({ success: true, data: { index: indexName, id: id || null } });
   } catch (error) {
@@ -355,15 +377,44 @@ async function searchGraph(req, res, next) {
     const provider = getProvider();
     const limit = clampNumber(topK || 5, 1, 50);
     const filters = metadata && typeof metadata === 'object' ? metadata : {};
+    const modeInput = (req.body.searchMode || req.body.mode || 'keyword').toLowerCase();
+    const requiresVector = modeInput === 'vector' || modeInput === 'hybrid';
+    let vectorOptions = null;
+
+    if (requiresVector) {
+      try {
+        const queryEmbedding = await embeddings.embedText(query);
+        if (!queryEmbedding) {
+          throw new Error('Embedding provider returned no data');
+        }
+
+        const vectorWeightInput = Number(req.body.vectorWeight);
+        const textWeightInput = Number(req.body.textWeight);
+        const candidateInput = Number(req.body.candidateCount);
+
+        vectorOptions = {
+          embedding: queryEmbedding,
+          mode: modeInput,
+          vectorWeight: Number.isFinite(vectorWeightInput) ? clampNumber(vectorWeightInput, 0, 1) : undefined,
+          textWeight: Number.isFinite(textWeightInput) ? clampNumber(textWeightInput, 0, 1) : undefined,
+          candidateCount: Number.isFinite(candidateInput) ? clampNumber(candidateInput, limit, 500) : undefined
+        };
+      } catch (error) {
+        console.error('[RAG] Failed to embed query for vector search', error.message);
+        return res.status(500).json({ success: false, error: 'Failed to generate query embedding' });
+      }
+    }
 
     const documents = await provider.search(collection, query, {
       limit,
-      filters
+      filters,
+      vector: vectorOptions
     });
 
     const payload = {
       index: collection,
       query,
+      searchMode: requiresVector ? modeInput : 'keyword',
       count: documents.length,
       documents
     };
@@ -391,9 +442,37 @@ async function runBasicWorkflow(req, res, next) {
     const contextLimit = clampNumber(options.maxContextItems || 6, 1, 15);
     const filters = options.metadata && typeof options.metadata === 'object' ? options.metadata : {};
 
+    const searchMode = (options.searchMode || options.mode || 'keyword').toLowerCase();
+    let workflowVectorOptions = null;
+
+    if (searchMode === 'vector' || searchMode === 'hybrid') {
+      try {
+        const queryEmbedding = await embeddings.embedText(query);
+        if (!queryEmbedding) {
+          throw new Error('Embedding provider returned no data');
+        }
+        const vectorWeightInput = Number(options.vectorWeight);
+        const textWeightInput = Number(options.textWeight);
+        const candidateInput = Number(options.candidateCount);
+
+        workflowVectorOptions = {
+          embedding: queryEmbedding,
+          mode: searchMode,
+          vectorWeight: Number.isFinite(vectorWeightInput) ? clampNumber(vectorWeightInput, 0, 1) : undefined,
+          textWeight: Number.isFinite(textWeightInput) ? clampNumber(textWeightInput, 0, 1) : undefined,
+          candidateCount: Number.isFinite(candidateInput)
+            ? clampNumber(candidateInput, contextLimit, 500)
+            : undefined
+        };
+      } catch (error) {
+        console.error('[Workflow] Failed to embed query', error.message);
+      }
+    }
+
     const documents = await provider.search(collection, query, {
       limit: contextLimit,
-      filters
+      filters,
+      vector: workflowVectorOptions
     });
 
     const userPrompt = buildWorkflowPrompt(query, documents);
@@ -419,6 +498,7 @@ async function runBasicWorkflow(req, res, next) {
         index: collection,
         answer: choice?.content || null,
         contextCount: documents.length,
+        searchMode,
         context: documents,
         llm: {
           model,

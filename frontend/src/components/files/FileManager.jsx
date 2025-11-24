@@ -13,13 +13,31 @@ const STATUS_VARIANTS = {
   failed: { label: 'Failed', badge: 'destructive', dot: 'bg-destructive' }
 }
 
-export function FileManager({ files, onUpload, onDelete, selectedIds, onToggleSelect, onClearSelected }) {
+export function FileManager({ files, onUpload, onDelete, selectedIds = [], onToggleSelect, onClearSelected }) {
   const inputRef = useRef(null)
   const [isUploading, setIsUploading] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [search, setSearch] = useState('')
 
   const handleUploadClick = () => {
     inputRef.current?.click()
+  }
+
+  const confirmAndDelete = async ids => {
+    if (!onDelete || !ids.length) return
+
+    const label = ids.length === 1 ? 'this file' : `${ids.length} files`
+    const shouldDelete = typeof window === 'undefined'
+      ? true
+      : window.confirm(`Permanently delete ${label}? This action cannot be undone.`)
+    if (!shouldDelete) return
+
+    setIsDeleting(true)
+    try {
+      await onDelete(ids)
+    } finally {
+      setIsDeleting(false)
+    }
   }
 
   const handleFilesChanged = async event => {
@@ -43,12 +61,25 @@ export function FileManager({ files, onUpload, onDelete, selectedIds, onToggleSe
   const formatSize = size => `${(size / 1024).toFixed(1)} KB`
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between px-4 py-3">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex items-center justify-between gap-2 px-4 py-3">
         <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Knowledge base</p>
-        <Button size="sm" variant="secondary" type="button" onClick={handleUploadClick} disabled={isUploading}>
-          {isUploading ? 'Uploading…' : 'Upload'}
-        </Button>
+        <div className="flex items-center gap-2">
+          {selectedIds.length > 0 && (
+            <Button
+              size="sm"
+              variant="destructive"
+              type="button"
+              onClick={() => confirmAndDelete(selectedIds)}
+              disabled={isDeleting}
+            >
+              {isDeleting ? 'Deleting…' : `Delete (${selectedIds.length})`}
+            </Button>
+          )}
+          <Button size="sm" variant="secondary" type="button" onClick={handleUploadClick} disabled={isUploading}>
+            {isUploading ? 'Uploading…' : 'Upload'}
+          </Button>
+        </div>
         <input ref={inputRef} type="file" className="hidden" multiple onChange={handleFilesChanged} />
       </div>
 
@@ -97,7 +128,10 @@ export function FileManager({ files, onUpload, onDelete, selectedIds, onToggleSe
                   variant="ghost"
                   size="icon"
                   className="text-muted-foreground"
-                  onClick={() => onDelete(file.id)}
+                  onClick={event => {
+                    event.stopPropagation()
+                    confirmAndDelete([file.id])
+                  }}
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>

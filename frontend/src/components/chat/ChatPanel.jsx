@@ -13,7 +13,9 @@ export function ChatPanel({
   selectedFileIds,
   onClearFileSelection,
   selectedFiles,
-  isLoadingMessages
+  isLoadingMessages,
+  isSendingMessage,
+  onOpenVectorSearch
 }) {
   const canChat = Boolean(conversation)
 
@@ -24,7 +26,7 @@ export function ChatPanel({
   }, [selectedFileIds])
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-1 min-h-0 flex-col">
       <div className="flex items-center justify-between border-b px-4 py-3">
         <div>
           <h2 className="text-lg font-semibold">
@@ -33,6 +35,9 @@ export function ChatPanel({
           <p className="text-xs text-muted-foreground">{repoSummary}</p>
         </div>
         <div className="flex items-center gap-2">
+          <Button type="button" variant="secondary" onClick={onOpenVectorSearch}>
+            Vector search
+          </Button>
           {selectedFileIds.length > 0 && (
             <Badge variant="outline" className="cursor-pointer" onClick={onClearFileSelection}>
               Clear selection
@@ -44,10 +49,10 @@ export function ChatPanel({
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-hidden">
         <div className="flex h-full flex-col">
           {selectedFiles?.length > 0 && (
-            <ScrollArea className="border-b px-4 py-2">
+            <ScrollArea className="max-h-32 border-b px-4 py-2">
               <div className="flex flex-wrap gap-2">
                 {selectedFiles.map(file => (
                   <Badge key={file.id} variant="secondary" className="text-xs">
@@ -57,13 +62,17 @@ export function ChatPanel({
               </div>
             </ScrollArea>
           )}
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-hidden">
             <MessageList messages={messages} isLoading={isLoadingMessages} />
           </div>
         </div>
       </div>
 
-      <MessageComposer onSend={onSendMessage} disabled={!canChat} isLoading={isLoadingMessages} />
+      <MessageComposer
+        onSend={onSendMessage}
+        disabled={!canChat}
+        isLoading={isLoadingMessages || isSendingMessage}
+      />
     </div>
   )
 }

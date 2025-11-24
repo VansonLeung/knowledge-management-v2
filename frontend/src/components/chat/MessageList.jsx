@@ -12,19 +12,20 @@ export function MessageList({ messages, isLoading }) {
   }, [messages])
 
   return (
-    <ScrollArea className="h-full px-4 py-4" viewportRef={viewportRef}>
-      <div className="space-y-4">
+    <div className="flex h-full flex-col">
+      <ScrollArea className="h-full px-4 py-4" viewportRef={viewportRef}>
+        <div className="space-y-4">
         {messages.map(message => (
           <div key={message.id} className="flex gap-3">
             <Avatar className={message.role === 'assistant' ? 'bg-primary/10' : 'bg-secondary/20'}>
               <AvatarFallback>{message.role === 'assistant' ? 'AI' : 'U'}</AvatarFallback>
             </Avatar>
             <div>
+              <p className="text-xs text-muted-foreground">
+                {message.createdAt ? new Date(message.createdAt).toLocaleTimeString() : ''}
+              </p>
               <p className="text-sm font-semibold">
-                {message.role === 'assistant' ? 'Assistant' : 'You'}{' '}
-                <span className="text-xs text-muted-foreground">
-                  {new Date(message.createdAt).toLocaleTimeString()}
-                </span>
+                {message.role === 'assistant' ? 'Assistant' : 'You'}
               </p>
               <p className="whitespace-pre-line text-sm text-muted-foreground">{message.content}</p>
             </div>
@@ -36,7 +37,8 @@ export function MessageList({ messages, isLoading }) {
         {!isLoading && messages.length === 0 && (
           <p className="text-center text-sm text-muted-foreground">No messages yet. Say hello!</p>
         )}
-      </div>
-    </ScrollArea>
+        </div>
+      </ScrollArea>
+    </div>
   )
 }

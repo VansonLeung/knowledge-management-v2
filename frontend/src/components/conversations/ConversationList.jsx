@@ -14,7 +14,7 @@ export function ConversationList({ items, activeId, onSelect, onCreate }) {
   }, [items, search])
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between px-4 py-3">
         <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Conversations</p>
         <Button size="sm" type="button" onClick={onCreate}>

@@ -6,9 +6,46 @@ const { getProvider: getStorageProvider } = require('../storage');
 const { getQueue } = require('../queue');
 const ragService = require('../rag');
 const { chunkText } = require('../../utils/text');
+const { embedTexts, averageEmbedding } = require('../embeddings');
 
 const COLLECTION_NAME = process.env.RAG_COLLECTION || 'knowledge_documents';
 const pymupdfServiceUrl = process.env.PYMUPDF_SERVICE_URL || 'http://localhost:16002';
+
+function buildChunkPayloads(fileId, chunks, embeddings = []) {
+  if (!Array.isArray(chunks) || !chunks.length) return [];
+
+  return chunks.map((content, idx) => ({
+    id: `${fileId}::${idx}`,
+    content,
+    embedding: Array.isArray(embeddings[idx]) ? embeddings[idx] : null
+  }));
+}
+
+function normalizeEntities(entities = []) {
+  if (!Array.isArray(entities)) {
+    return [];
+  }
+
+  return entities
+    .map(entity => {
+      if (!entity) return null;
+
+      const name = entity.name ?? entity.value;
+      if (!name) return null;
+
+      const normalized = {
+        name: String(name),
+        type: entity.type ? String(entity.type) : 'unknown'
+      };
+
+      if (entity.description) {
+        normalized.description = String(entity.description);
+      }
+
+      return normalized;
+    })
+    .filter(Boolean);
+}
 
 async function ensureFolderOwnership(folderId, userId) {
   if (!folderId) return null;
@@ -179,6 +216,19 @@ async function processFile(fileId) {
       throw new Error('No textual content returned from extractor');
     }
     const chunks = chunkText(markdown, 1500, 200);
+    const normalizedEntities = normalizeEntities(entities);
+    let chunkEmbeddings = [];
+
+    if (chunks.length) {
+      try {
+        chunkEmbeddings = await embedTexts(chunks);
+      } catch (error) {
+        console.warn(`[FileService] Failed to generate embeddings for file ${fileId}:`, error.message);
+      }
+    }
+
+    const chunkPayloads = buildChunkPayloads(fileRecord.id, chunks, chunkEmbeddings);
+    const docEmbedding = averageEmbedding(chunkPayloads.map(chunk => chunk.embedding).filter(Boolean));
 
     const ragDoc = {
       id: fileRecord.id,
@@ -189,16 +239,18 @@ async function processFile(fileId) {
         folderId: fileRecord.folderId,
         ownerId: fileRecord.ownerId,
         storagePath: fileRecord.storagePath,
+        fileId: fileRecord.id,
         ...fileRecord.metadata,
         ...extractedMetadata
       },
-      entities,
+      entities: normalizedEntities,
       relationships: [],
-      chunks
+      chunkVectors: chunkPayloads,
+      embedding: docEmbedding
     };
 
     const provider = ragService.getProvider();
-    await provider.indexDocument(COLLECTION_NAME, ragDoc);
+    await provider.indexDocument(COLLECTION_NAME, ragDoc, { vectorize: false });
 
     await fileRecord.update({
       status: 'ready',

@@ -9,7 +9,8 @@ const {
 } = require('../controllers/conversation.controller');
 const {
   listMessages,
-  createMessage
+  createMessage,
+  streamMessage
 } = require('../controllers/message.controller');
 
 const router = express.Router();
@@ -24,5 +25,6 @@ router.delete('/:conversationId', deleteConversation);
 
 router.get('/:conversationId/messages', listMessages);
 router.post('/:conversationId/messages', createMessage);
+router.post('/:conversationId/messages/stream', streamMessage);
 
 module.exports = router;
