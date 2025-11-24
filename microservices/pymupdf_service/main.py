@@ -39,6 +39,20 @@ def _convert_to_markdown(path: str) -> str:
     return pymupdf4llm.to_markdown(path)
 
 
+def _convert_pages_to_markdown(doc: fitz.Document):
+    """Return a {page_number: markdown} mapping."""
+    per_page = {}
+    for page_index in range(doc.page_count):
+        try:
+            markdown = pymupdf4llm.to_markdown(doc, page_numbers=[page_index])
+        except Exception:
+            markdown = ""
+        markdown = (markdown or "").strip()
+        if markdown:
+            per_page[page_index + 1] = markdown
+    return per_page
+
+
 def _extract_headings(markdown: str, limit: int = 8):
     headings = []
     for line in markdown.splitlines():
@@ -65,8 +79,7 @@ def _extract_keywords(markdown: str, limit: int = 8):
     ]
 
 
-def _document_metadata(path: str):
-    doc = fitz.open(path)
+def _document_metadata(doc: fitz.Document):
     metadata = {
         "page_count": doc.page_count,
         "title": doc.metadata.get("title"),
@@ -74,17 +87,35 @@ def _document_metadata(path: str):
         "subject": doc.metadata.get("subject"),
         "keywords": doc.metadata.get("keywords"),
     }
-    doc.close()
     return metadata
 
 
 def _analyze_pdf(path: str):
     markdown = _convert_to_markdown(path)
-    metadata = _document_metadata(path)
-    entities = _extract_headings(markdown) + _extract_keywords(markdown)
-    if metadata.get("page_count"):
-        entities.append({"type": "page_count", "value": metadata["page_count"]})
-    return {"markdown": markdown, "metadata": metadata, "entities": entities}
+    doc = fitz.open(path)
+    try:
+        metadata = _document_metadata(doc)
+        entities = _extract_headings(markdown) + _extract_keywords(markdown)
+        if metadata.get("page_count"):
+            entities.append({"type": "page_count", "value": metadata["page_count"]})
+
+        per_page_markdown = _convert_pages_to_markdown(doc)
+        pages = []
+        for page_index in range(doc.page_count):
+            page = doc.load_page(page_index)
+            text = page.get_text("text")
+            entry = {"page": page_index + 1}
+            if text and text.strip():
+                entry["text"] = text
+            page_markdown = per_page_markdown.get(page_index + 1)
+            if page_markdown:
+                entry["markdown"] = page_markdown
+            if len(entry) > 1:
+                pages.append(entry)
+
+        return {"markdown": markdown, "metadata": metadata, "entities": entities, "pages": pages}
+    finally:
+        doc.close()
 
 
 @app.post("/convert/pdf-to-markdown")

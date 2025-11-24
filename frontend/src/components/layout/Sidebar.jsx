@@ -12,7 +12,14 @@ export function Sidebar({
   onDeleteFile,
   selectedFileIds,
   onToggleFile,
-  onClearSelection
+  onClearSelection,
+  folders,
+  folderScope,
+  activeFolderId,
+  onFolderChange,
+  onCreateFolder,
+  onMoveFile,
+  onInspectFile
 }) {
   return (
     <div className="flex h-full flex-col">
@@ -33,6 +40,13 @@ export function Sidebar({
           selectedIds={selectedFileIds}
           onToggleSelect={onToggleFile}
           onClearSelected={onClearSelection}
+          folders={folders}
+          folderScope={folderScope}
+          activeFolderId={activeFolderId}
+          onFolderChange={onFolderChange}
+          onCreateFolder={onCreateFolder}
+          onMoveFile={onMoveFile}
+          onInspectFile={onInspectFile}
         />
       </div>
     </div>

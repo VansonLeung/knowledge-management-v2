@@ -4,6 +4,15 @@ const { embedTexts, averageEmbedding } = require('../embeddings');
 
 const DEFAULT_SEARCH_FIELDS = ['content', 'title', 'metadata.*', 'entities.name'];
 
+function resolveKeywordField(key, value) {
+  if (key.endsWith('.keyword')) return key;
+  const sample = Array.isArray(value) ? value.find(item => typeof item === 'string') : value;
+  if (typeof sample === 'string') {
+    return `${key}.keyword`;
+  }
+  return key;
+}
+
 function normalizeChunk(chunk, idx, docId = 'doc') {
   if (!chunk) return null;
 
@@ -93,7 +102,8 @@ function pickBestChunkScore(chunks, queryEmbedding, documentEmbedding) {
       bestChunk = {
         id: chunk.id,
         content: chunk.content,
-        score
+        score,
+        metadata: chunk.metadata || null
       };
     }
   });
@@ -217,8 +227,17 @@ class ElasticsearchProvider extends RagProvider {
 
     if (filters && Object.keys(filters).length > 0) {
       Object.entries(filters).forEach(([key, value]) => {
+        if (value === undefined || value === null) return;
         boolQuery.filter = boolQuery.filter || [];
-        boolQuery.filter.push({ term: { [key]: value } });
+        if (Array.isArray(value)) {
+          const terms = value.filter(item => item !== undefined && item !== null);
+          if (terms.length === 0) return;
+          const resolvedKey = resolveKeywordField(key, terms);
+          boolQuery.filter.push({ terms: { [resolvedKey]: terms } });
+          return;
+        }
+        const resolvedKey = resolveKeywordField(key, value);
+        boolQuery.filter.push({ term: { [resolvedKey]: value } });
       });
     }
 
@@ -319,6 +338,22 @@ class ElasticsearchProvider extends RagProvider {
     } catch (error) {
       if (error.meta?.statusCode === 404) {
         return;
+      }
+      throw error;
+    }
+  }
+
+  async getDocument(collection, id) {
+    try {
+      const response = await this.client.get({ index: collection, id });
+      const source = response._source || {};
+      return {
+        id: response._id,
+        ...source
+      };
+    } catch (error) {
+      if (error.meta?.statusCode === 404) {
+        return null;
       }
       throw error;
     }

@@ -154,8 +154,8 @@ async function streamMessage(req, res, next) {
     const contextLimit = clampNumber(req.body.maxContextItems || 6, 1, 15);
     const searchMode = (req.body.searchMode || 'hybrid').toLowerCase();
     const filters = req.body.metadata && typeof req.body.metadata === 'object' ? { ...req.body.metadata } : {};
-    if (fileIds.length === 1) {
-      filters['metadata.fileId'] = fileIds[0];
+    if (fileIds.length) {
+      filters['metadata.fileId'] = fileIds.length === 1 ? fileIds[0] : fileIds;
     }
 
     let vectorOptions = null;

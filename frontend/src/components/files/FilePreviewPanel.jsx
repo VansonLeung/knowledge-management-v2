@@ -54,6 +54,11 @@ export function FilePreviewPanel({ files = [] }) {
               {activeFile.metadata.pageCount} pages
             </Badge>
           )}
+          {activeFile?.metadata?.folderPath && (
+            <Badge variant="outline" className="text-[11px]">
+              {activeFile.metadata.folderPath}
+            </Badge>
+          )}
           {activeFile?.metadata?.chunkCount && (
             <Badge variant="outline" className="text-[11px]">
               {activeFile.metadata.chunkCount} chunks

@@ -88,6 +88,40 @@ function App() {
               ))}
             </ul>
           </div>
+          {analysis.pages?.length ? (
+            <div>
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold">Per-page output</h2>
+                <span className="text-xs text-muted-foreground">{analysis.pages.length} pages detected</span>
+              </div>
+              <div className="mt-2 divide-y rounded border">
+                {analysis.pages.map(page => (
+                  <details key={page.page} className="group" open={analysis.pages.length <= 3}>
+                    <summary className="cursor-pointer select-none bg-gray-50 px-3 py-2 text-sm font-medium">
+                      Page {page.page}
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        {page.markdown ? 'Markdown available' : 'Markdown unavailable'}
+                      </span>
+                    </summary>
+                    <div className="space-y-3 bg-white px-3 py-3 text-sm">
+                      {page.markdown && (
+                        <div>
+                          <p className="text-xs uppercase text-muted-foreground">Markdown</p>
+                          <div className="mt-1 rounded bg-gray-100 p-2 text-xs whitespace-pre-wrap">{page.markdown}</div>
+                        </div>
+                      )}
+                      {page.text && (
+                        <div>
+                          <p className="text-xs uppercase text-muted-foreground">Plain text</p>
+                          <div className="mt-1 rounded bg-gray-50 p-2 text-xs whitespace-pre-wrap">{page.text}</div>
+                        </div>
+                      )}
+                    </div>
+                  </details>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       )}
 

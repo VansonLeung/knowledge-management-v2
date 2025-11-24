@@ -1,14 +1,23 @@
 const { verifyToken } = require('../utils/jwt');
 const { User } = require('../models');
 
+function extractToken(req) {
+  const authHeader = req.headers['authorization'];
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    return authHeader.replace('Bearer ', '').trim();
+  }
+  if (req.query?.access_token) {
+    return String(req.query.access_token).trim();
+  }
+  return null;
+}
+
 async function requireAuth(req, res, next) {
   try {
-    const authHeader = req.headers['authorization'];
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ success: false, error: 'Missing authorization header' });
+    const token = extractToken(req);
+    if (!token) {
+      return res.status(401).json({ success: false, error: 'Missing authorization token' });
     }
-
-    const token = authHeader.replace('Bearer ', '').trim();
     const decoded = verifyToken(token);
 
     const user = await User.findByPk(decoded.sub);

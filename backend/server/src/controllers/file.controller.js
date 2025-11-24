@@ -1,4 +1,12 @@
-const { saveUploadedFile, listFiles, deleteFile } = require('../services/file');
+const { File } = require('../models');
+const {
+  saveUploadedFile,
+  listFiles,
+  deleteFile,
+  moveFile,
+  getFileDiagnostics
+} = require('../services/file');
+const { getProvider: getStorageProvider } = require('../services/storage');
 
 function sanitizeFile(file) {
   if (!file) return null;
@@ -34,7 +42,8 @@ async function uploadFiles(req, res, next) {
 async function listUserFiles(req, res, next) {
   try {
     const folderId = req.query.folderId || null;
-    const files = await listFiles(req.user.id, { folderId });
+    const scope = req.query.scope || null;
+    const files = await listFiles(req.user.id, { folderId, scope });
     res.json({ success: true, data: files.map(file => sanitizeFile(file)) });
   } catch (error) {
     next(error);
@@ -50,8 +59,63 @@ async function removeFile(req, res, next) {
   }
 }
 
+async function downloadFile(req, res, next) {
+  try {
+    const file = await File.findOne({ where: { id: req.params.fileId, ownerId: req.user.id } });
+    if (!file) {
+      return res.status(404).json({ success: false, error: 'File not found' });
+    }
+
+    const storage = getStorageProvider();
+    const stream = await storage.createReadStream(file.storagePath);
+
+    res.setHeader('Content-Type', file.mimeType || 'application/octet-stream');
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename*=UTF-8''${encodeURIComponent(file.originalName || file.name)}`
+    );
+    if (file.size) {
+      res.setHeader('Content-Length', file.size);
+    }
+
+    stream.on('error', next);
+    stream.pipe(res);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function updateFileMetadata(req, res, next) {
+  try {
+    const rawFolderId = req.body?.folderId;
+    const folderId = rawFolderId ? rawFolderId : null;
+    const file = await moveFile(req.user.id, req.params.fileId, folderId);
+    res.json({ success: true, data: sanitizeFile(file) });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function getFileDetails(req, res, next) {
+  try {
+    const details = await getFileDiagnostics(req.user.id, req.params.fileId);
+    res.json({
+      success: true,
+      data: {
+        file: sanitizeFile(details.file),
+        document: details.document
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   uploadFiles,
   listUserFiles,
-  removeFile
+  removeFile,
+  downloadFile,
+  updateFileMetadata,
+  getFileDetails
 };

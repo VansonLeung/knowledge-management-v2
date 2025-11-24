@@ -11,14 +11,46 @@ const { embedTexts, averageEmbedding } = require('../embeddings');
 const COLLECTION_NAME = process.env.RAG_COLLECTION || 'knowledge_documents';
 const pymupdfServiceUrl = process.env.PYMUPDF_SERVICE_URL || 'http://localhost:16002';
 
+function normalizeOriginalName(value) {
+  if (typeof value !== 'string' || !value) return 'uploaded-file';
+  try {
+    return Buffer.from(value, 'latin1').toString('utf8');
+  } catch (error) {
+    return value;
+  }
+}
+
 function buildChunkPayloads(fileId, chunks, embeddings = []) {
   if (!Array.isArray(chunks) || !chunks.length) return [];
 
-  return chunks.map((content, idx) => ({
-    id: `${fileId}::${idx}`,
-    content,
-    embedding: Array.isArray(embeddings[idx]) ? embeddings[idx] : null
-  }));
+  return chunks.map((chunk, idx) => {
+    const descriptor = typeof chunk === 'string' ? { content: chunk } : chunk;
+    const metadata = descriptor.metadata && Object.keys(descriptor.metadata).length ? descriptor.metadata : undefined;
+
+    return {
+      id: `${fileId}::${idx}`,
+      content: descriptor.content,
+      embedding: Array.isArray(embeddings[idx]) ? embeddings[idx] : null,
+      metadata
+    };
+  });
+}
+
+function buildChunkDescriptors(markdown, pageEntries = []) {
+  if (Array.isArray(pageEntries) && pageEntries.length) {
+    return pageEntries.flatMap(entry => {
+      const text = typeof entry.text === 'string' ? entry.text.trim() : '';
+      const markdownContent = typeof entry.markdown === 'string' ? entry.markdown.trim() : '';
+      const pageContent = markdownContent || text;
+      if (!pageContent) return [];
+      return chunkText(pageContent, 1500, 200).map(content => ({
+        content,
+        metadata: { pageNumber: entry.page }
+      }));
+    });
+  }
+
+  return chunkText(markdown, 1500, 200).map(content => ({ content }));
 }
 
 function normalizeEntities(entities = []) {
@@ -47,6 +79,101 @@ function normalizeEntities(entities = []) {
     .filter(Boolean);
 }
 
+async function syncRagDocumentMetadata(fileId, metadataPatch = {}) {
+  try {
+    const provider = ragService.getProvider();
+    const document = await provider.getDocument(COLLECTION_NAME, fileId);
+    if (!document) return null;
+
+    const updated = {
+      ...document,
+      id: fileId,
+      metadata: { ...(document.metadata || {}), ...metadataPatch },
+      chunkVectors: document.chunkVectors || [],
+      entities: Array.isArray(document.entities) ? document.entities : [],
+      relationships: Array.isArray(document.relationships) ? document.relationships : []
+    };
+
+    await provider.indexDocument(COLLECTION_NAME, updated, { vectorize: false });
+    return updated;
+  } catch (error) {
+    console.warn(`[FileService] Failed to sync RAG metadata for ${fileId}:`, error.message);
+    return null;
+  }
+}
+
+async function syncFileFolderMetadata(file, folder) {
+  const metadata = { ...(file.metadata || {}) };
+  if (folder) {
+    metadata.folderPath = folder.referencePath;
+    metadata.folderId = folder.id;
+  } else {
+    delete metadata.folderPath;
+    delete metadata.folderId;
+  }
+
+  await file.update({ metadata });
+  await syncRagDocumentMetadata(file.id, {
+    folderId: folder ? folder.id : null,
+    folderPath: folder ? folder.referencePath : null
+  });
+}
+
+function buildReferencePath(name, parentFolder) {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) {
+    const error = new Error('Folder name is required');
+    error.statusCode = 400;
+    throw error;
+  }
+  return parentFolder ? `${parentFolder.referencePath}/${trimmed}` : trimmed;
+}
+
+async function assertParentIsValid(folder, nextParentId) {
+  if (!nextParentId) return null;
+  if (folder && folder.id === nextParentId) {
+    const error = new Error('Folder cannot be its own parent');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const parent = await Folder.findOne({ where: { id: nextParentId, ownerId: folder.ownerId } });
+  if (!parent) {
+    const error = new Error('Parent folder not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  let cursor = parent;
+  while (cursor) {
+    if (cursor.id === folder.id) {
+      const circularError = new Error('Cannot move folder into its descendant');
+      circularError.statusCode = 400;
+      throw circularError;
+    }
+    if (!cursor.parentId) break;
+    cursor = await Folder.findOne({ where: { id: cursor.parentId, ownerId: folder.ownerId } });
+  }
+
+  return parent;
+}
+
+async function refreshFolderTree(folder) {
+  const queue = [folder];
+  while (queue.length) {
+    const current = queue.shift();
+    await current.save();
+    const files = await File.findAll({ where: { folderId: current.id } });
+    await Promise.all(files.map(file => syncFileFolderMetadata(file, current)));
+
+    const children = await Folder.findAll({ where: { parentId: current.id, ownerId: current.ownerId } });
+    children.forEach(child => {
+      child.referencePath = `${current.referencePath}/${child.name}`;
+      queue.push(child);
+    });
+  }
+}
+
 async function ensureFolderOwnership(folderId, userId) {
   if (!folderId) return null;
   const folder = await Folder.findOne({ where: { id: folderId, ownerId: userId } });
@@ -63,6 +190,13 @@ async function saveUploadedFile(user, uploadedFile, { folderId = null, conversat
   const folder = await ensureFolderOwnership(folderId, user.id);
   let ownedConversationIds = [];
 
+  const originalName = normalizeOriginalName(uploadedFile.originalname);
+  const folderMetadata = {};
+  if (folder) {
+    folderMetadata.folderPath = folder.referencePath;
+    folderMetadata.folderId = folder.id;
+  }
+
   if (conversationIds && conversationIds.length) {
     const conversations = await Conversation.findAll({
       where: { id: conversationIds, userId: user.id },
@@ -71,20 +205,18 @@ async function saveUploadedFile(user, uploadedFile, { folderId = null, conversat
     ownedConversationIds = conversations.map(c => c.id);
   }
 
-  const stored = await storage.save(uploadedFile.buffer, { originalName: uploadedFile.originalname });
+  const stored = await storage.save(uploadedFile.buffer, { originalName });
 
   const fileRecord = await File.create({
-    name: path.parse(uploadedFile.originalname).name,
-    originalName: uploadedFile.originalname,
+    name: path.parse(originalName).name || originalName,
+    originalName,
     mimeType: uploadedFile.mimetype,
     size: uploadedFile.size,
     storagePath: stored.path,
     ownerId: user.id,
     folderId: folder ? folder.id : null,
     status: 'pending',
-    metadata: {
-      folderPath: folder ? folder.referencePath : null
-    }
+    metadata: folderMetadata
   });
 
   if (ownedConversationIds.length) {
@@ -101,9 +233,14 @@ async function enqueueFileForProcessing(fileId) {
   await queue.addJob('process-file', { fileId });
 }
 
-async function listFiles(userId, { folderId } = {}) {
+async function listFiles(userId, { folderId, scope } = {}) {
   const where = { ownerId: userId };
-  if (folderId) where.folderId = folderId;
+
+  if (scope === 'uncategorized') {
+    where.folderId = null;
+  } else if (folderId) {
+    where.folderId = folderId;
+  }
 
   const files = await File.findAll({
     where,
@@ -183,7 +320,8 @@ async function extractFileContent(fileRecord) {
       return {
         markdown,
         metadata: { mimeType: fileRecord.mimeType },
-        entities: []
+        entities: [],
+        pages: []
       };
     }
   }
@@ -194,11 +332,122 @@ async function extractFileContent(fileRecord) {
     return {
       markdown: text,
       metadata: { mimeType: fileRecord.mimeType },
-      entities: []
+      entities: [],
+      pages: []
     };
   }
 
   throw new Error(`Unsupported file type: ${fileRecord.mimeType}`);
+}
+
+async function listFolders(userId) {
+  const folders = await Folder.findAll({
+    where: { ownerId: userId },
+    order: [['referencePath', 'ASC'], ['createdAt', 'ASC']]
+  });
+  return folders;
+}
+
+async function createFolder(userId, { name, parentId = null }) {
+  const folderName = String(name || '').trim();
+  if (!folderName) {
+    const error = new Error('Folder name is required');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const parent = parentId ? await ensureFolderOwnership(parentId, userId) : null;
+  const referencePath = buildReferencePath(folderName, parent || null);
+
+  const folder = await Folder.create({
+    name: folderName,
+    ownerId: userId,
+    parentId: parent ? parent.id : null,
+    referencePath
+  });
+
+  return folder;
+}
+
+async function updateFolder(userId, folderId, { name, parentId } = {}) {
+  const folder = await Folder.findOne({ where: { id: folderId, ownerId: userId } });
+  if (!folder) {
+    const error = new Error('Folder not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const nextName = name ? String(name).trim() : folder.name;
+  if (!nextName) {
+    const error = new Error('Folder name is required');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const nextParentId = parentId === undefined ? folder.parentId : parentId || null;
+  let nextParent = null;
+  if (nextParentId) {
+    nextParent = await assertParentIsValid(folder, nextParentId);
+  }
+
+  folder.name = nextName;
+  folder.parentId = nextParent ? nextParent.id : null;
+  folder.referencePath = buildReferencePath(nextName, nextParent || null);
+
+  await refreshFolderTree(folder);
+  return folder;
+}
+
+async function moveFile(userId, fileId, folderId = null) {
+  const file = await File.findOne({ where: { id: fileId, ownerId: userId } });
+  if (!file) {
+    const error = new Error('File not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const folder = folderId ? await ensureFolderOwnership(folderId, userId) : null;
+  const metadata = { ...(file.metadata || {}) };
+  if (folder) {
+    metadata.folderPath = folder.referencePath;
+    metadata.folderId = folder.id;
+  } else {
+    delete metadata.folderPath;
+    delete metadata.folderId;
+  }
+
+  await file.update({
+    folderId: folder ? folder.id : null,
+    metadata
+  });
+
+  await syncRagDocumentMetadata(file.id, {
+    folderId: folder ? folder.id : null,
+    folderPath: folder ? folder.referencePath : null
+  });
+
+  return file;
+}
+
+async function getFileDiagnostics(userId, fileId) {
+  const file = await File.findOne({ where: { id: fileId, ownerId: userId } });
+  if (!file) {
+    const error = new Error('File not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  let document = null;
+  try {
+    const provider = ragService.getProvider();
+    document = await provider.getDocument(COLLECTION_NAME, fileId);
+  } catch (error) {
+    if (error.statusCode !== 404) {
+      throw error;
+    }
+  }
+
+  return { file, document };
 }
 
 async function processFile(fileId) {
@@ -211,23 +460,24 @@ async function processFile(fileId) {
   try {
     await fileRecord.update({ status: 'processing', error: null });
 
-    const { markdown, metadata: extractedMetadata = {}, entities = [] } = await extractFileContent(fileRecord);
+    const { markdown, metadata: extractedMetadata = {}, entities = [], pages = [] } = await extractFileContent(fileRecord);
     if (!markdown) {
       throw new Error('No textual content returned from extractor');
     }
-    const chunks = chunkText(markdown, 1500, 200);
+    const pageEntries = Array.isArray(pages) ? pages : [];
+    const chunkDescriptors = buildChunkDescriptors(markdown, pageEntries);
     const normalizedEntities = normalizeEntities(entities);
     let chunkEmbeddings = [];
 
-    if (chunks.length) {
+    if (chunkDescriptors.length) {
       try {
-        chunkEmbeddings = await embedTexts(chunks);
+        chunkEmbeddings = await embedTexts(chunkDescriptors.map(descriptor => descriptor.content));
       } catch (error) {
         console.warn(`[FileService] Failed to generate embeddings for file ${fileId}:`, error.message);
       }
     }
 
-    const chunkPayloads = buildChunkPayloads(fileRecord.id, chunks, chunkEmbeddings);
+    const chunkPayloads = buildChunkPayloads(fileRecord.id, chunkDescriptors, chunkEmbeddings);
     const docEmbedding = averageEmbedding(chunkPayloads.map(chunk => chunk.embedding).filter(Boolean));
 
     const ragDoc = {
@@ -241,7 +491,8 @@ async function processFile(fileId) {
         storagePath: fileRecord.storagePath,
         fileId: fileRecord.id,
         ...fileRecord.metadata,
-        ...extractedMetadata
+        ...extractedMetadata,
+        pageCount: pageEntries.length || undefined
       },
       entities: normalizedEntities,
       relationships: [],
@@ -257,7 +508,8 @@ async function processFile(fileId) {
       metadata: {
         ...fileRecord.metadata,
         ...extractedMetadata,
-        chunkCount: chunks.length
+        pageCount: pageEntries.length || undefined,
+        chunkCount: chunkPayloads.length
       }
     });
   } catch (error) {
@@ -274,5 +526,10 @@ module.exports = {
   listFiles,
   deleteFile,
   enqueueFileForProcessing,
-  processFile
+  processFile,
+  listFolders,
+  createFolder,
+  updateFolder,
+  moveFile,
+  getFileDiagnostics
 };

@@ -146,7 +146,7 @@ export function FilePanel({ apiBase, token }) {
           </Button>
           {!ensureAuth() && <p className="text-sm text-muted-foreground">Set API base + auth token first.</p>}
         </form>
-        <ResponseViewer response={uploadResponse} onClear={() => setUploadResponse(null)} />
+        <ResponseViewer title="Upload file" scope="files" response={uploadResponse} onClear={() => setUploadResponse(null)} />
 
         <form onSubmit={handleList} className="space-y-4 border-t pt-4">
           <div className="space-y-2">
@@ -157,7 +157,7 @@ export function FilePanel({ apiBase, token }) {
             {listLoading ? 'Loading…' : 'List files'}
           </Button>
         </form>
-        <ResponseViewer response={listResponse} onClear={() => setListResponse(null)} />
+        <ResponseViewer title="List files" scope="files" response={listResponse} onClear={() => setListResponse(null)} />
 
         <form onSubmit={handleDelete} className="space-y-4 border-t pt-4">
           <div className="space-y-2">
@@ -173,7 +173,7 @@ export function FilePanel({ apiBase, token }) {
             {deleteLoading ? 'Deleting…' : 'Delete file'}
           </Button>
         </form>
-        <ResponseViewer response={deleteResponse} onClear={() => setDeleteResponse(null)} />
+        <ResponseViewer title="Delete file" scope="files" response={deleteResponse} onClear={() => setDeleteResponse(null)} />
       </CardContent>
     </Card>
   )

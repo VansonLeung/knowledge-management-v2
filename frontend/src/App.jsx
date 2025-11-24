@@ -9,8 +9,10 @@ import { CreateConversationDialog } from '@/components/conversations/CreateConve
 import { VectorSearchDialog } from '@/components/search/VectorSearchDialog'
 import { useToast } from '@/components/ui/use-toast'
 import { listConversations, createConversation, deleteConversation as deleteConversationApi, listMessages } from '@/api/conversations'
-import { listFiles, uploadFiles, deleteFile } from '@/api/files'
+import { listFiles, uploadFiles, deleteFile, moveFile as moveFileApi, getFileDetails } from '@/api/files'
+import { listFolders as listFoldersApi, createFolder as createFolderApi } from '@/api/folders'
 import { streamAssistantResponse } from '@/api/chat'
+import { FileDiagnosticsDialog } from '@/components/files/FileDiagnosticsDialog'
 
 function AppContent() {
   const { status, login, register, token } = useAuth()
@@ -20,12 +22,16 @@ function AppContent() {
   const [selectedConversation, setSelectedConversation] = useState(null)
   const [messages, setMessages] = useState([])
   const [files, setFiles] = useState([])
+  const [folders, setFolders] = useState([])
   const [selectedFileIds, setSelectedFileIds] = useState([])
   const [loadingWorkspace, setLoadingWorkspace] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [isLoadingMessages, setIsLoadingMessages] = useState(false)
   const [isSendingMessage, setIsSendingMessage] = useState(false)
   const [searchDialogOpen, setSearchDialogOpen] = useState(false)
+  const [folderScope, setFolderScope] = useState('all')
+  const [activeFolderId, setActiveFolderId] = useState(null)
+  const [diagnosticsState, setDiagnosticsState] = useState({ open: false, loading: false, fileId: null, data: null })
 
   const showError = useCallback(
     (err, { title = 'Something went wrong', fallback } = {}) => {
@@ -50,12 +56,46 @@ function AppContent() {
     }
   }
 
+  const loadFolders = useCallback(async () => {
+    try {
+      const folderData = await listFoldersApi()
+      setFolders(folderData)
+      return folderData
+    } catch (err) {
+      showError(err, { title: 'Unable to load categories' })
+      return []
+    }
+  }, [showError])
+
+  const loadFiles = useCallback(
+    async (scopeOverride = folderScope, folderIdOverride = activeFolderId) => {
+      try {
+        const params = {}
+        if (scopeOverride === 'folder' && folderIdOverride) {
+          params.folderId = folderIdOverride
+        } else if (scopeOverride === 'uncategorized') {
+          params.scope = 'uncategorized'
+        }
+        const fileData = await listFiles(params)
+        setFiles(fileData)
+      } catch (err) {
+        showError(err, { title: 'Unable to load files' })
+      }
+    },
+    [folderScope, activeFolderId, showError]
+  )
+
   const bootstrapWorkspace = async () => {
     setLoadingWorkspace(true)
     try {
-      const [conversationData, fileData] = await Promise.all([listConversations(), listFiles()])
+      const [conversationData, fileData, folderData] = await Promise.all([
+        listConversations(),
+        listFiles(),
+        listFoldersApi()
+      ])
       setConversations(conversationData)
       setFiles(fileData)
+      setFolders(folderData)
 
       if (!selectedConversation && conversationData.length) {
         await selectConversation(conversationData[0])
@@ -147,10 +187,10 @@ function AppContent() {
   const handleUploadFiles = async selectedFiles => {
     try {
       await uploadFiles(selectedFiles, {
-        conversationIds: selectedConversation ? [selectedConversation.id] : []
+        conversationIds: selectedConversation ? [selectedConversation.id] : [],
+        folderId: folderScope === 'folder' ? activeFolderId : undefined
       })
-      const updatedFiles = await listFiles()
-      setFiles(updatedFiles)
+      await loadFiles()
     } catch (err) {
       showError(err, { title: 'Upload failed' })
     }
@@ -161,10 +201,51 @@ function AppContent() {
     if (!targets.length) return
     try {
       await Promise.all(targets.map(id => deleteFile(id)))
-      setFiles(prev => prev.filter(file => !targets.includes(file.id)))
+      await loadFiles()
       setSelectedFileIds(prev => prev.filter(id => !targets.includes(id)))
     } catch (err) {
       showError(err, { title: 'Unable to delete file' })
+    }
+  }
+
+  const handleMoveFile = async (fileId, nextFolderId) => {
+    if (!fileId) return
+    try {
+      await moveFileApi(fileId, nextFolderId)
+      await loadFiles()
+      await loadFolders()
+    } catch (err) {
+      showError(err, { title: 'Unable to move file' })
+    }
+  }
+
+  const handleFolderChange = (scope, folderId) => {
+    setFolderScope(scope)
+    setActiveFolderId(folderId)
+    loadFiles(scope, folderId)
+  }
+
+  const handleCreateFolder = async ({ name, parentId }) => {
+    try {
+      const folder = await createFolderApi({ name, parentId })
+      setFolderScope('folder')
+      setActiveFolderId(folder.id)
+      await loadFolders()
+      await loadFiles('folder', folder.id)
+    } catch (err) {
+      showError(err, { title: 'Unable to create category' })
+    }
+  }
+
+  const handleInspectFile = async fileId => {
+    if (!fileId) return
+    setDiagnosticsState({ open: true, loading: true, fileId, data: null })
+    try {
+      const details = await getFileDetails(fileId)
+      setDiagnosticsState({ open: true, loading: false, fileId, data: details })
+    } catch (err) {
+      showError(err, { title: 'Unable to load diagnostics' })
+      setDiagnosticsState({ open: false, loading: false, fileId: null, data: null })
     }
   }
 
@@ -238,6 +319,13 @@ function AppContent() {
             selectedFileIds={selectedFileIds}
             onToggleFile={handleToggleFile}
             onClearSelection={handleClearSelection}
+            folders={folders}
+            folderScope={folderScope}
+            activeFolderId={activeFolderId}
+            onFolderChange={handleFolderChange}
+            onCreateFolder={handleCreateFolder}
+            onMoveFile={handleMoveFile}
+            onInspectFile={handleInspectFile}
           />
         }
       >
@@ -268,6 +356,16 @@ function AppContent() {
         onClose={() => setSearchDialogOpen(false)}
         defaultIndex={null}
         selectedFiles={selectedFiles}
+        folders={folders}
+        defaultFolderScope={folderScope}
+        defaultFolderId={activeFolderId}
+      />
+
+      <FileDiagnosticsDialog
+        open={diagnosticsState.open}
+        onClose={() => setDiagnosticsState({ open: false, loading: false, fileId: null, data: null })}
+        data={diagnosticsState.data}
+        isLoading={diagnosticsState.loading}
       />
     </>
   )

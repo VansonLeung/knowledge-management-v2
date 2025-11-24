@@ -85,7 +85,7 @@ export function WorkflowPanel({ request }) {
             {loading ? 'Running…' : 'Run workflow'}
           </Button>
         </form>
-        <ResponseViewer response={response} onClear={() => setResponse(null)} />
+        <ResponseViewer title="Workflow run" scope="workflow" response={response} onClear={() => setResponse(null)} />
       </CardContent>
     </Card>
   )

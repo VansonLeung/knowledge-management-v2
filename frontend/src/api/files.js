@@ -24,3 +24,15 @@ export async function uploadFiles(files, options = {}) {
 export async function deleteFile(fileId) {
   await api.delete(`/files/${fileId}`)
 }
+
+export async function moveFile(fileId, folderId) {
+  const { data } = await api.patch(`/files/${fileId}`, {
+    folderId: folderId || null
+  })
+  return data.data
+}
+
+export async function getFileDetails(fileId) {
+  const { data } = await api.get(`/files/${fileId}/details`)
+  return data.data
+}

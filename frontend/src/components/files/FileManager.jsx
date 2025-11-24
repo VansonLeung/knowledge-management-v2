@@ -4,7 +4,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
-import { Trash2 } from 'lucide-react'
+import { Info, Trash2 } from 'lucide-react'
 
 const STATUS_VARIANTS = {
   pending: { label: 'Queued', badge: 'outline', dot: 'bg-amber-500' },
@@ -14,8 +14,23 @@ const STATUS_VARIANTS = {
 }
 
 const getDisplayName = file => file?.originalName || file?.name || 'Untitled file'
+const UNCATEGORIZED_VALUE = '__uncategorized__'
 
-export function FileManager({ files, onUpload, onDelete, selectedIds = [], onToggleSelect, onClearSelected }) {
+export function FileManager({
+  files,
+  onUpload,
+  onDelete,
+  selectedIds = [],
+  onToggleSelect,
+  onClearSelected,
+  folders = [],
+  folderScope = 'all',
+  activeFolderId = null,
+  onFolderChange,
+  onCreateFolder,
+  onMoveFile,
+  onInspectFile
+}) {
   const inputRef = useRef(null)
   const [isUploading, setIsUploading] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -62,6 +77,27 @@ export function FileManager({ files, onUpload, onDelete, selectedIds = [], onTog
 
   const formatSize = size => `${(size / 1024).toFixed(1)} KB`
 
+  const folderSelectValue = folderScope === 'folder'
+    ? activeFolderId || 'all'
+    : folderScope
+
+  const handleFolderChange = value => {
+    if (!onFolderChange) return
+    if (value === 'all' || value === 'uncategorized') {
+      onFolderChange(value, null)
+      return
+    }
+    onFolderChange('folder', value)
+  }
+
+  const handleCreateFolderClick = () => {
+    if (!onCreateFolder || typeof window === 'undefined') return
+    const name = window.prompt('New category name')
+    if (!name || !name.trim()) return
+    const parentId = folderScope === 'folder' ? activeFolderId : null
+    onCreateFolder({ name: name.trim(), parentId })
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between gap-2 px-4 py-3">
@@ -86,6 +122,26 @@ export function FileManager({ files, onUpload, onDelete, selectedIds = [], onTog
       </div>
 
       <div className="space-y-2 px-4 pb-2">
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <select
+              className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-xs"
+              value={folderSelectValue}
+              onChange={event => handleFolderChange(event.target.value)}
+            >
+              <option value="all">All categories</option>
+              <option value="uncategorized">Uncategorized</option>
+              {folders.map(folder => (
+                <option key={folder.id} value={folder.id}>
+                  {folder.referencePath}
+                </option>
+              ))}
+            </select>
+            <Button type="button" size="sm" variant="outline" onClick={handleCreateFolderClick}>
+              New category
+            </Button>
+          </div>
+        </div>
         <Input
           value={search}
           onChange={event => setSearch(event.target.value)}
@@ -113,30 +169,66 @@ export function FileManager({ files, onUpload, onDelete, selectedIds = [], onTog
                 )}
               >
                 <button className="flex-1 text-left" onClick={() => onToggleSelect(file.id)}>
-                  <p className="font-medium text-foreground">{getDisplayName(file)}</p>
+                  <p className="font-medium flex-1 text-foreground">{getDisplayName(file)}</p>
                   <p className="text-xs text-muted-foreground">
                     {formatSize(file.size)} • {file.mimeType}
                     {file.metadata?.chunkCount && ` • ${file.metadata.chunkCount} chunks`}
                   </p>
+                  {file.metadata?.folderPath && (
+                    <p className="text-xs text-muted-foreground">Folder · {file.metadata.folderPath}</p>
+                  )}
+
+                  <div className="flex gap-1">
+                    <Badge variant={STATUS_VARIANTS[file.status]?.badge || 'outline'} className="mr-2 flex items-center gap-1">
+                      <span
+                        className={cn('h-2 w-2 rounded-full', STATUS_VARIANTS[file.status]?.dot || 'bg-muted-foreground')}
+                      />
+                      {STATUS_VARIANTS[file.status]?.label || file.status}
+                    </Badge>
+                    <select
+                      className="mr-2 h-7 rounded-md border border-input bg-background px-2 text-xs"
+                      value={file.folderId || UNCATEGORIZED_VALUE}
+                      onChange={event => {
+                        const value = event.target.value
+                        const nextFolderId = value === UNCATEGORIZED_VALUE ? null : value
+                        onMoveFile?.(file.id, nextFolderId)
+                      }}
+                    >
+                      <option value={UNCATEGORIZED_VALUE}>Uncategorized</option>
+                      {folders.map(folder => (
+                        <option key={folder.id} value={folder.id}>
+                          {folder.referencePath}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="text-muted-foreground"
+                      onClick={event => {
+                        event.stopPropagation()
+                        onInspectFile?.(file.id)
+                      }}
+                    >
+                      <Info className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="text-muted-foreground"
+                      onClick={event => {
+                        event.stopPropagation()
+                        confirmAndDelete([file.id])
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+
+                  </div>
+
                 </button>
-                <Badge variant={STATUS_VARIANTS[file.status]?.badge || 'outline'} className="mr-2 flex items-center gap-1">
-                  <span
-                    className={cn('h-2 w-2 rounded-full', STATUS_VARIANTS[file.status]?.dot || 'bg-muted-foreground')}
-                  />
-                  {STATUS_VARIANTS[file.status]?.label || file.status}
-                </Badge>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="text-muted-foreground"
-                  onClick={event => {
-                    event.stopPropagation()
-                    confirmAndDelete([file.id])
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
               </div>
             </li>
           ))}

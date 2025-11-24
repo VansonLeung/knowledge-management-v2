@@ -1,8 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { Badge } from '@/components/ui/badge'
+import { ExternalLink } from 'lucide-react'
 import { searchKnowledgeBase } from '@/api/rag'
+import { API_BASE_URL } from '@/api/http'
+import { useAuth } from '@/context/AuthContext'
 
 const SEARCH_MODES = [
   { label: 'Keyword', value: 'keyword' },
@@ -10,7 +14,16 @@ const SEARCH_MODES = [
   { label: 'Hybrid', value: 'hybrid' }
 ]
 
-export function VectorSearchDialog({ open, onClose, defaultIndex, selectedFiles = [] }) {
+export function VectorSearchDialog({
+  open,
+  onClose,
+  defaultIndex,
+  selectedFiles = [],
+  folders = [],
+  defaultFolderScope = 'all',
+  defaultFolderId = null
+}) {
+  const { token } = useAuth()
   const [form, setForm] = useState({
     query: '',
     topK: 5,
@@ -24,6 +37,8 @@ export function VectorSearchDialog({ open, onClose, defaultIndex, selectedFiles 
   const [isSearching, setIsSearching] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
+  const [folderFilters, setFolderFilters] = useState([])
+  const [restrictToSelection, setRestrictToSelection] = useState(false)
 
   const selectedFileLabel = useMemo(() => {
     if (!selectedFiles.length) return 'Whole knowledge base'
@@ -31,9 +46,26 @@ export function VectorSearchDialog({ open, onClose, defaultIndex, selectedFiles 
     return `${selectedFiles.length} files selected`
   }, [selectedFiles])
 
+  const tokenQuery = useMemo(() => (token ? `?access_token=${encodeURIComponent(token)}` : ''), [token])
+
   const formatScore = value => (Number.isFinite(value) ? value.toFixed(3) : null)
 
-  if (!open) return null
+  const resolvePageNumber = doc => {
+    if (!doc) return null
+    const best = doc.bestChunk?.metadata?.pageNumber
+    if (best !== undefined && best !== null) {
+      return best
+    }
+    const chunk = doc.chunks?.find(item => item?.metadata?.pageNumber)
+    return chunk?.metadata?.pageNumber ?? null
+  }
+
+  const openSourceDocument = (fileId, pageNumber) => {
+    if (!fileId) return
+    const pageAnchor = pageNumber !== null && pageNumber !== undefined ? `#page=${pageNumber}` : ''
+    const url = `${API_BASE_URL}/files/${fileId}/download${tokenQuery}${pageAnchor}`
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
 
   const updateForm = (field, value) => {
     setForm(prev => ({ ...prev, [field]: value }))
@@ -47,6 +79,27 @@ export function VectorSearchDialog({ open, onClose, defaultIndex, selectedFiles 
       throw new Error('Metadata filter must be valid JSON')
     }
   }
+
+  const handleFolderFilterChange = event => {
+    const options = Array.from(event.target.selectedOptions).map(option => option.value)
+    setFolderFilters(options)
+  }
+
+  useEffect(() => {
+    if (!open) {
+      setFolderFilters([])
+      setRestrictToSelection(false)
+      return
+    }
+    if (defaultFolderScope === 'folder' && defaultFolderId) {
+      setFolderFilters([defaultFolderId])
+    } else {
+      setFolderFilters([])
+    }
+    setRestrictToSelection(selectedFiles.length > 0)
+  }, [open, defaultFolderScope, defaultFolderId, selectedFiles.length])
+
+  if (!open) return null
 
   const handleSubmit = async event => {
     event.preventDefault()
@@ -67,8 +120,18 @@ export function VectorSearchDialog({ open, onClose, defaultIndex, selectedFiles 
         payload.index = defaultIndex
       }
 
-      if (metadata) {
-        payload.metadata = metadata
+      const metadataFilters = metadata ? { ...metadata } : {}
+
+      if (restrictToSelection && selectedFiles.length) {
+        metadataFilters['metadata.fileId'] = selectedFiles.map(file => file.id)
+      }
+
+      if (folderFilters.length) {
+        metadataFilters['metadata.folderId'] = folderFilters
+      }
+
+      if (Object.keys(metadataFilters).length) {
+        payload.metadata = metadataFilters
       }
 
       if (form.searchMode !== 'keyword') {
@@ -215,15 +278,43 @@ export function VectorSearchDialog({ open, onClose, defaultIndex, selectedFiles 
           </div>
         </form>
 
+        {selectedFiles.length > 0 && (
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={restrictToSelection}
+              onChange={event => setRestrictToSelection(event.target.checked)}
+            />
+            Limit to {selectedFiles.length} selected file{selectedFiles.length > 1 ? 's' : ''}
+          </label>
+        )}
+
+        <div>
+          <label className="text-xs uppercase text-muted-foreground">Category filters</label>
+          <select
+            multiple
+            value={folderFilters}
+            onChange={handleFolderFilterChange}
+            className="mt-1 h-24 w-full rounded-md border border-input bg-background px-2 text-sm"
+          >
+            {folders.map(folder => (
+              <option key={folder.id} value={folder.id}>
+                {folder.referencePath}
+              </option>
+            ))}
+          </select>
+          <p className="text-[11px] text-muted-foreground">Hold Cmd/Ctrl to pick multiple folders.</p>
+        </div>
+
         {error && <p className="text-sm text-destructive">{error}</p>}
 
         {result && (
           <div className="max-h-80 space-y-3 overflow-y-auto rounded-lg border p-3">
             {result.documents?.length ? (
               result.documents.map(doc => (
-                <article key={doc.id} className="space-y-1 rounded-md border bg-muted/30 p-3">
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>{doc.id}</span>
+                <article key={doc.id} className="space-y-2 rounded-md border bg-muted/30 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <span className="font-mono">{doc.id}</span>
                     <span>
                       {(() => {
                         const parts = []
@@ -235,11 +326,34 @@ export function VectorSearchDialog({ open, onClose, defaultIndex, selectedFiles 
                       })()}
                     </span>
                   </div>
-                  <h4 className="text-sm font-semibold">{doc.title || doc.metadata?.originalName || 'Untitled'}</h4>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="text-sm font-semibold">
+                      {doc.title || doc.metadata?.originalName || 'Untitled'}
+                    </h4>
+                    {(() => {
+                      const pageNumber = resolvePageNumber(doc)
+                      if (pageNumber === null) return null
+                      return (
+                        <Badge variant="secondary" className="text-[11px]">
+                          Page {pageNumber}
+                        </Badge>
+                      )
+                    })()}
+                    {doc.metadata?.fileId && (
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 text-xs text-primary"
+                        onClick={() => openSourceDocument(doc.metadata.fileId, resolvePageNumber(doc))}
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        Open source
+                      </button>
+                    )}
+                  </div>
                   {doc.bestChunk && (
-                    <p className="text-sm text-muted-foreground">
-                      {doc.bestChunk.content?.slice(0, 240)}
-                      {doc.bestChunk.content?.length > 240 && '…'}
+                    <p className="whitespace-pre-line text-sm text-muted-foreground">
+                      {doc.bestChunk.content?.slice(0, 360)}
+                      {doc.bestChunk.content?.length > 360 && '…'}
                     </p>
                   )}
                 </article>

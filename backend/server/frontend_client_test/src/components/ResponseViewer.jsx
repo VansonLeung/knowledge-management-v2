@@ -1,19 +1,46 @@
-import { useMemo } from 'react'
+import { useEffect, useId, useMemo } from 'react'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
+import { useResponseLog } from '../context/ResponseLogContext'
 
-export function ResponseViewer({ response, onClear }) {
-  const pretty = useMemo(() => {
-    if (!response) return ''
-    if (typeof response.data === 'string') return response.data
-    try {
-      return JSON.stringify(response.data, null, 2)
-    } catch (error) {
-      return String(response.data)
+function formatResponsePayload(response) {
+  if (!response) return ''
+  if (typeof response.data === 'string') return response.data
+  try {
+    return JSON.stringify(response.data, null, 2)
+  } catch (error) {
+    return String(response.data)
+  }
+}
+
+export function ResponseViewer({ title, subtitle, scope, response, onClear, inline }) {
+  const pretty = useMemo(() => formatResponsePayload(response), [response])
+  const hasResponse = Boolean(response)
+  const entryId = useId()
+  const { publish, remove } = useResponseLog()
+
+  useEffect(() => {
+    if (!hasResponse) {
+      remove(entryId)
+      return undefined
     }
-  }, [response])
+    publish(entryId, {
+      key: entryId,
+      title,
+      subtitle,
+      scope,
+      response,
+      pretty,
+      onClear
+    })
+    return () => remove(entryId)
+  }, [entryId, hasResponse, title, subtitle, response, pretty, onClear, publish, remove])
 
-  if (!response) return null
+  const shouldRenderInline = inline ?? false
+
+  if (!hasResponse || !shouldRenderInline) {
+    return null
+  }
 
   return (
     <div className="mt-4 space-y-2 rounded-lg border bg-muted/50 p-4">
@@ -34,3 +61,5 @@ export function ResponseViewer({ response, onClear }) {
     </div>
   )
 }
+
+export { formatResponsePayload }

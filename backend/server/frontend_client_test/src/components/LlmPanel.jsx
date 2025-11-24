@@ -232,7 +232,7 @@ export function LlmPanel({ request, apiBase, token }) {
             )}
           </div>
         )}
-        <ResponseViewer response={response} onClear={() => setResponse(null)} />
+        <ResponseViewer title="LLM request" scope="llm" response={response} onClear={() => setResponse(null)} />
       </CardContent>
     </Card>
   )

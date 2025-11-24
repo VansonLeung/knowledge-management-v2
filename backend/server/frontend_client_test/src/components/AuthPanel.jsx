@@ -143,7 +143,7 @@ export function AuthPanel({ apiBase, onAuthSuccess, currentUser }) {
           </div>
         )}
 
-        <ResponseViewer response={response} onClear={() => setResponse(null)} />
+        <ResponseViewer title="Authentication" scope="auth" response={response} onClear={() => setResponse(null)} />
       </CardContent>
     </Card>
   )
